@@ -81,7 +81,7 @@ STABLE
 AS $$
 BEGIN
     -- Setzt den Schwellwert für den %-Operator, der den GiST-Index nutzt
-    PERFORM set_limit(threshold);
+    PERFORM set_limit(threshold::real);
 
     RETURN QUERY
     SELECT
