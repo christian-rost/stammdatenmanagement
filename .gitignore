@@ -1,0 +1,22 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.python-version
+
+# UV
+uv.lock
+
+# Node
+node_modules/
+dist/
+
+# Data files (kein Commit von SAP-Rohdaten)
+LFA1.txt
+LFA1.csv
+
+# Claude memory
+.claude/
