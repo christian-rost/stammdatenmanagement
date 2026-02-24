@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS fuzzy_entscheidungen (
 );
 
 -- Funktion: Ähnliche Paare via Trigram-Ähnlichkeit
+--   Nutzt set_limit() + %-Operator → GiST-Index wird verwendet
 --   threshold: Schwellwert 0.0–1.0 (Standard 0.6)
 --   Exakte Dubletten (gleicher Name + Stadt) werden ausgeschlossen
 CREATE OR REPLACE FUNCTION get_fuzzy_duplicates(threshold float DEFAULT 0.6)
@@ -75,25 +76,31 @@ RETURNS TABLE (
     ort01_b      varchar,
     aehnlichkeit float
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 AS $$
+BEGIN
+    -- Setzt den Schwellwert für den %-Operator, der den GiST-Index nutzt
+    PERFORM set_limit(threshold);
+
+    RETURN QUERY
     SELECT
         a.lifnr,
         a.name1,
-        COALESCE(a.ort01, '') AS ort01_a,
+        COALESCE(a.ort01, '')            AS ort01_a,
         b.lifnr,
         b.name1,
-        COALESCE(b.ort01, '') AS ort01_b,
+        COALESCE(b.ort01, '')            AS ort01_b,
         similarity(a.name1, b.name1)::float
     FROM lfa1 a
     JOIN lfa1 b
         ON a.lifnr < b.lifnr
-        AND similarity(a.name1, b.name1) > threshold
+        AND a.name1 % b.name1          -- nutzt GiST-Index
         AND NOT (
             a.name1 = b.name1
             AND COALESCE(a.ort01, '') = COALESCE(b.ort01, '')
         )
     ORDER BY similarity(a.name1, b.name1) DESC, a.name1
-    LIMIT 500;
+    LIMIT 300;
+END;
 $$;
