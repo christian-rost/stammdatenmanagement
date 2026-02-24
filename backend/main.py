@@ -13,9 +13,9 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from supabase import create_client, Client
 
-from .config import CORS_ORIGINS, PORT, supabase_url, supabase_key
+from .config import CORS_ORIGINS, PORT, supabase_url, supabase_key, admin_user, admin_pw
 from .auth import create_access_token, authenticate_user, get_current_user
-from .user_storage import create_user
+from .user_storage import create_user, get_user_by_username
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +43,22 @@ if supabase_url and supabase_key:
     logger.info("Supabase client initialized")
 else:
     logger.warning("Supabase credentials not set - database features disabled")
+
+
+@app.on_event("startup")
+async def bootstrap_admin():
+    """Admin-User aus Env-Variablen anlegen falls noch nicht vorhanden."""
+    if not admin_user or not admin_pw:
+        logger.warning("admin_user/admin_pw not set - skipping admin bootstrap")
+        return
+    if get_user_by_username(admin_user):
+        logger.info(f"Admin user '{admin_user}' already exists")
+        return
+    result = create_user(admin_user, f"{admin_user}@local", admin_pw, is_admin=True)
+    if result:
+        logger.info(f"Admin user '{admin_user}' created")
+    else:
+        logger.error("Failed to create admin user")
 
 
 # --- Pydantic models ---
