@@ -308,6 +308,11 @@ async def export_decisions(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Failed to export")
 
 
+@app.get("/")
+async def root():
+    return {"status": "healthy", "service": "Stammdatenmanagement API"}
+
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "database": supabase is not None}
