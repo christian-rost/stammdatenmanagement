@@ -324,6 +324,93 @@ async def export_decisions(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Failed to export")
 
 
+# --- Fuzzy endpoints ---
+
+class FuzzyPair(BaseModel):
+    lifnr_a: str
+    name1_a: Optional[str] = None
+    ort01_a: Optional[str] = None
+    lifnr_b: str
+    name1_b: Optional[str] = None
+    ort01_b: Optional[str] = None
+    aehnlichkeit: float
+    status: str = "offen"
+    lifnr_behalten: Optional[str] = None
+    notiz: Optional[str] = None
+
+
+class FuzzyEntscheidungRequest(BaseModel):
+    lifnr_a: str
+    lifnr_b: str
+    lifnr_behalten: Optional[str] = None
+    notiz: Optional[str] = None
+    status: str = "bearbeitet"
+
+
+@app.get("/api/fuzzy", response_model=list[FuzzyPair])
+async def list_fuzzy(
+    threshold: float = 0.6,
+    current_user: dict = Depends(get_current_user)
+):
+    """Ähnliche Paare via Trigram-Ähnlichkeit."""
+    _require_db()
+    try:
+        pairs_resp = supabase.rpc("get_fuzzy_duplicates", {"threshold": threshold}).execute()
+        pairs_raw = pairs_resp.data or []
+
+        decisions_resp = supabase.table("fuzzy_entscheidungen").select("*").execute()
+        decisions = {
+            (d["lifnr_a"], d["lifnr_b"]): d
+            for d in (decisions_resp.data or [])
+        }
+
+        result = []
+        for p in pairs_raw:
+            la, lb = p["lifnr_a"], p["lifnr_b"]
+            dec = decisions.get((la, lb), {})
+            result.append(FuzzyPair(
+                lifnr_a=la,
+                name1_a=p.get("name1_a"),
+                ort01_a=p.get("ort01_a", ""),
+                lifnr_b=lb,
+                name1_b=p.get("name1_b"),
+                ort01_b=p.get("ort01_b", ""),
+                aehnlichkeit=round(p.get("aehnlichkeit", 0), 2),
+                status=dec.get("status", "offen"),
+                lifnr_behalten=dec.get("lifnr_behalten"),
+                notiz=dec.get("notiz"),
+            ))
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching fuzzy duplicates: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch fuzzy duplicates")
+
+
+@app.post("/api/fuzzy/decision")
+async def save_fuzzy_decision(
+    body: FuzzyEntscheidungRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Entscheidung für ein Fuzzy-Paar speichern (upsert)."""
+    _require_db()
+    try:
+        supabase.table("fuzzy_entscheidungen").upsert(
+            {
+                "lifnr_a": body.lifnr_a,
+                "lifnr_b": body.lifnr_b,
+                "lifnr_behalten": body.lifnr_behalten,
+                "notiz": body.notiz,
+                "bearbeitet_von": current_user["username"],
+                "status": body.status,
+            },
+            on_conflict="lifnr_a,lifnr_b"
+        ).execute()
+        return {"message": "Entscheidung gespeichert"}
+    except Exception as e:
+        logger.error(f"Error saving fuzzy decision: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save fuzzy decision")
+
+
 @app.get("/")
 async def root():
     return {"status": "healthy", "service": "Stammdatenmanagement API"}

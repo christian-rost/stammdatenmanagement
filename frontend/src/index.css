@@ -398,3 +398,82 @@ body {
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--color-gray);
 }
+
+/* Mode tabs (Exakt / Ähnlich) */
+.mode-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 0.2rem;
+}
+.mode-tab {
+  padding: 0.35rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: rgba(255,255,255,0.65);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+.mode-tab.active {
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+.mode-tab:hover:not(.active) { color: var(--color-white); }
+
+/* Threshold slider */
+.threshold-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--color-gray);
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+}
+.threshold-bar input[type="range"] {
+  flex: 1;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* Fuzzy list item */
+.fuzzy-vs {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.vs-label {
+  font-size: 0.7rem;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 0 0.1rem;
+}
+
+/* Fuzzy compare table */
+.fuzzy-compare-table th:first-child { width: 80px; }
+.fuzzy-compare-table td.cell-behalten {
+  background-color: rgba(40, 167, 69, 0.08);
+  border-left: 3px solid var(--color-success);
+}
+.fuzzy-compare-table td.cell-differs {
+  font-weight: 500;
+}
+
+/* Similarity bar */
+.similarity-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.similarity-bar {
+  height: 8px;
+  border-radius: 4px;
+  max-width: 200px;
+  transition: width 0.3s;
+}

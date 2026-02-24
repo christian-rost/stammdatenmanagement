@@ -40,3 +40,60 @@ AS $$
     HAVING COUNT(*) > 1
     ORDER BY COUNT(*) DESC, l.name1;
 $$;
+
+-- 3. Fuzzy-Matching: Extension + Index + Funktion
+
+-- Extension aktivieren (einmalig)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- GiST-Index für schnelle Ähnlichkeitssuche auf name1
+CREATE INDEX IF NOT EXISTS lfa1_name1_trgm_idx ON lfa1 USING GiST (name1 gist_trgm_ops);
+
+-- Entscheidungstabelle für Fuzzy-Paare
+CREATE TABLE IF NOT EXISTS fuzzy_entscheidungen (
+    id                SERIAL PRIMARY KEY,
+    lifnr_a           varchar(10)  NOT NULL,
+    lifnr_b           varchar(10)  NOT NULL,
+    lifnr_behalten    varchar(10),
+    notiz             TEXT,
+    bearbeitet_von    varchar(100),
+    bearbeitet_am     TIMESTAMP    DEFAULT NOW(),
+    status            varchar(20)  NOT NULL DEFAULT 'offen',
+    UNIQUE (lifnr_a, lifnr_b)
+);
+
+-- Funktion: Ähnliche Paare via Trigram-Ähnlichkeit
+--   threshold: Schwellwert 0.0–1.0 (Standard 0.6)
+--   Exakte Dubletten (gleicher Name + Stadt) werden ausgeschlossen
+CREATE OR REPLACE FUNCTION get_fuzzy_duplicates(threshold float DEFAULT 0.6)
+RETURNS TABLE (
+    lifnr_a      varchar,
+    name1_a      varchar,
+    ort01_a      varchar,
+    lifnr_b      varchar,
+    name1_b      varchar,
+    ort01_b      varchar,
+    aehnlichkeit float
+)
+LANGUAGE sql
+STABLE
+AS $$
+    SELECT
+        a.lifnr,
+        a.name1,
+        COALESCE(a.ort01, '') AS ort01_a,
+        b.lifnr,
+        b.name1,
+        COALESCE(b.ort01, '') AS ort01_b,
+        similarity(a.name1, b.name1)::float
+    FROM lfa1 a
+    JOIN lfa1 b
+        ON a.lifnr < b.lifnr
+        AND similarity(a.name1, b.name1) > threshold
+        AND NOT (
+            a.name1 = b.name1
+            AND COALESCE(a.ort01, '') = COALESCE(b.ort01, '')
+        )
+    ORDER BY similarity(a.name1, b.name1) DESC, a.name1
+    LIMIT 500;
+$$;
