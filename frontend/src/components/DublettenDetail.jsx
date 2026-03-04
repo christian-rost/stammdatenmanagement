@@ -105,8 +105,14 @@ function DublettenDetail({ group, fetchWithAuth, onDecisionSaved }) {
                   <th>LIFNR</th>
                   <th>NAME1</th>
                   <th>NAME2</th>
+                  <th>Straße</th>
+                  <th>PLZ</th>
                   <th>ORT01</th>
                   <th>LAND1</th>
+                  <th>Telefon</th>
+                  <th>USt-IdNr</th>
+                  <th>Angelegt</th>
+                  <th>Löschvm.</th>
                 </tr>
               </thead>
               <tbody>
@@ -129,8 +135,18 @@ function DublettenDetail({ group, fetchWithAuth, onDecisionSaved }) {
                       <td className="lifnr-cell">{r.lifnr}</td>
                       <td>{r.name1 || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>{r.name2 || ''}</td>
+                      <td>{r.stras || '—'}</td>
+                      <td>{r.pstlz || '—'}</td>
                       <td>{r.ort01 || '—'}</td>
                       <td>{r.land1 || '—'}</td>
+                      <td style={{ color: 'var(--color-text-light)' }}>{r.telf1 || r.telf2 || ''}</td>
+                      <td style={{ color: 'var(--color-text-light)' }}>{r.stceg || ''}</td>
+                      <td style={{ color: 'var(--color-text-light)' }}>
+                        {r.erdat ? r.erdat.slice(0, 10) : ''}
+                      </td>
+                      <td style={{ color: r.loevm ? 'var(--color-error)' : 'var(--color-text-light)' }}>
+                        {r.loevm || ''}
+                      </td>
                     </tr>
                   )
                 })}

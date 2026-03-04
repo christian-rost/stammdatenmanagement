@@ -5,6 +5,7 @@ import DublettenList from './components/DublettenList.jsx'
 import DublettenDetail from './components/DublettenDetail.jsx'
 import FuzzyList from './components/FuzzyList.jsx'
 import FuzzyDetail from './components/FuzzyDetail.jsx'
+import ImportModal from './components/ImportModal.jsx'
 
 function App() {
   const { user, loading, logout, fetchWithAuth, isAuthenticated } = useAuth()
@@ -29,6 +30,7 @@ function App() {
   const [fuzzyLoaded, setFuzzyLoaded] = useState(false)
 
   const [exporting, setExporting] = useState(false)
+  const [showImport, setShowImport] = useState(false)
 
   useEffect(() => {
     if (isAuthenticated) loadGroups()
@@ -164,6 +166,11 @@ function App() {
         </div>
         <div className="header-user">
           <span>{user?.username}</span>
+          {user?.is_admin && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}>
+              Daten importieren
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={handleExport} disabled={exporting}>
             {exporting ? 'Exportiere...' : 'CSV Export'}
           </button>
@@ -210,6 +217,14 @@ function App() {
           </>
         )}
       </main>
+
+      {showImport && (
+        <ImportModal
+          fetchWithAuth={fetchWithAuth}
+          onClose={() => setShowImport(false)}
+          onImportDone={loadGroups}
+        />
+      )}
     </div>
   )
 }

@@ -1,10 +1,12 @@
 """Main FastAPI application for Stammdatenmanagement / Dubletten-Bereinigung."""
+import asyncio
 import csv
 import io
 import logging
+from datetime import datetime, date, time as dt_time
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, field_validator
@@ -101,15 +103,159 @@ class UserResponse(BaseModel):
 
 
 class DubletteRecord(BaseModel):
+    # Kernfelder (seit v1)
+    mandt: Optional[str] = None
     lifnr: Optional[str] = None
+    land1: Optional[str] = None
     name1: Optional[str] = None
     name2: Optional[str] = None
     name3: Optional[str] = None
     name4: Optional[str] = None
     ort01: Optional[str] = None
     ort02: Optional[str] = None
-    land1: Optional[str] = None
-    mandt: Optional[str] = None
+    # Adresse
+    stras: Optional[str] = None
+    pstlz: Optional[str] = None
+    pstl2: Optional[str] = None
+    pfach: Optional[str] = None
+    regio: Optional[str] = None
+    pfort: Optional[str] = None
+    # Matchcodes / Suche
+    sortl: Optional[str] = None
+    adrnr: Optional[str] = None
+    mcod1: Optional[str] = None
+    mcod2: Optional[str] = None
+    mcod3: Optional[str] = None
+    # Kontakt
+    anred: Optional[str] = None
+    telf1: Optional[str] = None
+    telf2: Optional[str] = None
+    telfx: Optional[str] = None
+    teltx: Optional[str] = None
+    telx1: Optional[str] = None
+    telbx: Optional[str] = None
+    # Steuer / Rechtliches
+    stceg: Optional[str] = None
+    stcd1: Optional[str] = None
+    stcd2: Optional[str] = None
+    stcd3: Optional[str] = None
+    stcd4: Optional[str] = None
+    stcd5: Optional[str] = None
+    stcd6: Optional[str] = None
+    stcdt: Optional[str] = None
+    stenr: Optional[str] = None
+    taxbs: Optional[str] = None
+    # Sperren / Status
+    loevm: Optional[str] = None
+    sperr: Optional[str] = None
+    sperm: Optional[str] = None
+    sperq: Optional[str] = None
+    sperz: Optional[str] = None
+    nodel: Optional[str] = None
+    # Klassifikation
+    brsch: Optional[str] = None
+    ktokk: Optional[str] = None
+    spras: Optional[str] = None
+    lzone: Optional[str] = None
+    dlgrp: Optional[str] = None
+    fityp: Optional[str] = None
+    indtyp: Optional[str] = None
+    legalnat: Optional[str] = None
+    comsize: Optional[str] = None
+    # Bankverbindung / Finanzen
+    bahns: Optional[str] = None
+    bbbnr: Optional[str] = None
+    bbsnr: Optional[str] = None
+    bubkz: Optional[str] = None
+    vbund: Optional[str] = None
+    fiskn: Optional[str] = None
+    fisku: Optional[str] = None
+    ktock: Optional[str] = None
+    kunnr: Optional[str] = None
+    lnrza: Optional[str] = None
+    xcpdk: Optional[str] = None
+    xzemp: Optional[str] = None
+    xlfza: Optional[str] = None
+    duefl: Optional[str] = None
+    # Erstellung / Änderung
+    erdat: Optional[str] = None
+    ernam: Optional[str] = None
+    updat: Optional[str] = None
+    uptim: Optional[str] = None
+    # Sonstiges SAP
+    begru: Optional[str] = None
+    datlt: Optional[str] = None
+    dtams: Optional[str] = None
+    dtaws: Optional[str] = None
+    esrnr: Optional[str] = None
+    konzs: Optional[str] = None
+    stkza: Optional[str] = None
+    stkzu: Optional[str] = None
+    stkzn: Optional[str] = None
+    txjcd: Optional[str] = None
+    scacd: Optional[str] = None
+    sfrgr: Optional[str] = None
+    regss: Optional[str] = None
+    actss: Optional[str] = None
+    ipisp: Optional[str] = None
+    profs: Optional[str] = None
+    stgdl: Optional[str] = None
+    emnfr: Optional[str] = None
+    lfurl: Optional[str] = None
+    confs: Optional[str] = None
+    podkzb: Optional[str] = None
+    qssys: Optional[str] = None
+    qssysdat: Optional[str] = None
+    revdb: Optional[str] = None
+    kraus: Optional[str] = None
+    werkr: Optional[str] = None
+    werks: Optional[str] = None
+    ltsna: Optional[str] = None
+    plkal: Optional[str] = None
+    # Personal (selten gefüllt)
+    gbort: Optional[str] = None
+    gbdat: Optional[str] = None
+    sexkz: Optional[str] = None
+    # Brasilien / Regional
+    j_1kfrepre: Optional[str] = None
+    j_1kftbus: Optional[str] = None
+    j_1kftind: Optional[str] = None
+    rg: Optional[str] = None
+    exp: Optional[str] = None
+    uf: Optional[str] = None
+    rgdate: Optional[str] = None
+    ric: Optional[str] = None
+    rne: Optional[str] = None
+    rnedate: Optional[str] = None
+    cnae: Optional[str] = None
+    crtn: Optional[str] = None
+    icmstaxpay: Optional[str] = None
+    tdt: Optional[str] = None
+    decregpc: Optional[str] = None
+    j_sc_capital: Optional[float] = None
+    j_sc_currency: Optional[str] = None
+    # Transport / Logistik
+    carrier_conf: Optional[str] = None
+    min_comp: Optional[str] = None
+    term_li: Optional[str] = None
+    crc_num: Optional[str] = None
+    cvp_xblck: Optional[str] = None
+    transport_chain: Optional[str] = None
+    staging_time: Optional[int] = None
+    scheduling_type: Optional[str] = None
+    submi_relevant: Optional[str] = None
+    # Personen-Kontakt
+    psofg: Optional[str] = None
+    psois: Optional[str] = None
+    pson1: Optional[str] = None
+    pson2: Optional[str] = None
+    pson3: Optional[str] = None
+    psovn: Optional[str] = None
+    psotl: Optional[str] = None
+    psohs: Optional[str] = None
+    psost: Optional[str] = None
+    alc: Optional[str] = None
+    pmt_office: Optional[str] = None
 
 
 class DubletteGroup(BaseModel):
@@ -409,6 +555,123 @@ async def save_fuzzy_decision(
     except Exception as e:
         logger.error(f"Error saving fuzzy decision: {e}")
         raise HTTPException(status_code=500, detail="Failed to save fuzzy decision")
+
+
+# --- Import endpoint ---
+
+_IMPORT_DATE_COLS = {"erdat", "gbdat", "updat", "qssysdat", "rgdate", "rnedate"}
+_IMPORT_TIME_COLS = {"uptim"}
+_IMPORT_NUMERIC_COLS = {"j_sc_capital"}
+_IMPORT_INT_COLS = {"staging_time"}
+
+
+def _parse_xlsx_bytes(content: bytes) -> list[dict]:
+    """Parst XLSX-Bytes und gibt bereinigte Datensätze zurück (synchron, für Thread)."""
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    db_headers = [h.lower() for h in next(rows_iter)]
+
+    records = []
+    for raw_row in rows_iter:
+        rec = {}
+        for col, val in zip(db_headers, raw_row):
+            if val is None or val == "":
+                continue
+            if col in _IMPORT_DATE_COLS:
+                if isinstance(val, (datetime, date)):
+                    rec[col] = val.date().isoformat() if isinstance(val, datetime) else val.isoformat()
+                else:
+                    s = str(val).strip()
+                    if s:
+                        rec[col] = s
+            elif col in _IMPORT_TIME_COLS:
+                if isinstance(val, dt_time):
+                    rec[col] = val.strftime("%H:%M:%S")
+                else:
+                    s = str(val).strip()
+                    if s:
+                        rec[col] = s
+            elif col in _IMPORT_NUMERIC_COLS:
+                try:
+                    rec[col] = float(val)
+                except (ValueError, TypeError):
+                    pass
+            elif col in _IMPORT_INT_COLS:
+                try:
+                    rec[col] = int(val)
+                except (ValueError, TypeError):
+                    pass
+            else:
+                s = str(val).strip()
+                if s:
+                    rec[col] = s
+        records.append(rec)
+
+    wb.close()
+    return records
+
+
+@app.get("/api/admin/check-schema")
+async def check_schema(current_user: dict = Depends(get_current_user)):
+    """Prüft ob die lfa1-Migration (neue Spalten) bereits ausgeführt wurde."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins")
+    try:
+        # Wenn stras existiert, ist die Migration gelaufen
+        supabase.table("lfa1").select("stras").limit(1).execute()
+        return {"migrated": True}
+    except Exception:
+        return {"migrated": False}
+
+
+@app.post("/api/admin/import-lfa1")
+async def import_lfa1(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """XLSX-Datei hochladen und in lfa1 importieren (nur Admins)."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins können Daten importieren")
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Nur XLSX-Dateien werden unterstützt")
+
+    content = await file.read()
+    logger.info(f"Import gestartet: {filename} ({len(content)} Bytes) von {current_user['username']}")
+
+    try:
+        records = await asyncio.to_thread(_parse_xlsx_bytes, content)
+    except Exception as e:
+        logger.error(f"XLSX-Parse-Fehler: {e}")
+        raise HTTPException(status_code=422, detail=f"Fehler beim Lesen der Datei: {e}")
+
+    total = len(records)
+    batch_size = 500
+    imported = 0
+    batch_errors = []
+
+    for i in range(0, total, batch_size):
+        batch = records[i: i + batch_size]
+        try:
+            supabase.table("lfa1").upsert(batch, on_conflict="lifnr").execute()
+            imported += len(batch)
+        except Exception as e:
+            msg = f"Batch {i // batch_size + 1}: {e}"
+            logger.error(msg)
+            batch_errors.append(msg)
+
+    logger.info(f"Import abgeschlossen: {imported}/{total} Datensätze")
+    return {
+        "imported": imported,
+        "total": total,
+        "errors": batch_errors,
+    }
 
 
 @app.get("/")
