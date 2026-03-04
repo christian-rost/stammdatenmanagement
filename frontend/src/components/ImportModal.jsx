@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 function ImportModal({ fetchWithAuth, onClose, onImportDone }) {
   const inputRef = useRef(null)
@@ -52,7 +53,7 @@ function ImportModal({ fetchWithAuth, onClose, onImportDone }) {
     }
   }
 
-  return (
+  const modal = (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
@@ -154,13 +155,15 @@ function ImportModal({ fetchWithAuth, onClose, onImportDone }) {
           >
             {status === 'uploading' ? 'Importiere…' : 'Importieren'}
           </button>
-          <button className="btn btn-outline" onClick={onClose}>
+          <button className="btn btn-secondary" onClick={onClose}>
             Schließen
           </button>
         </div>
       </div>
     </div>
   )
+
+  return createPortal(modal, document.body)
 }
 
 export default ImportModal
