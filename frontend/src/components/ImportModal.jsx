@@ -122,8 +122,24 @@ function ImportModal({ fetchWithAuth, onClose, onImportDone }) {
   const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
 
   const modal = (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e => e.stopPropagation()}>
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', top: 0, left: 0,
+        width: '100vw', height: '100vh',
+        background: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 9999,
+      }}
+    >
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 10,
+        width: 'min(480px, 92vw)',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
 
         <div className="modal-header">
           <h2>LFA1-Daten importieren</h2>

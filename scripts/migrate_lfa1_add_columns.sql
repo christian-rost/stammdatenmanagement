@@ -4,6 +4,9 @@
 -- Bestehende Spalten: mandt, lifnr, land1, name1-4, ort01, ort02
 -- ============================================================
 
+-- UNIQUE-Constraint auf lifnr (nötig für Upsert via App-Import)
+ALTER TABLE lfa1 ADD CONSTRAINT lfa1_lifnr_key UNIQUE (lifnr);
+
 ALTER TABLE lfa1
     ADD COLUMN IF NOT EXISTS pfach        TEXT,
     ADD COLUMN IF NOT EXISTS pstl2        TEXT,
