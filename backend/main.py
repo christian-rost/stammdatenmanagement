@@ -1,12 +1,10 @@
 """Main FastAPI application for Stammdatenmanagement / Dubletten-Bereinigung."""
-import asyncio
 import csv
 import io
 import logging
-from datetime import datetime, date, time as dt_time
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, field_validator
@@ -559,61 +557,6 @@ async def save_fuzzy_decision(
 
 # --- Import endpoint ---
 
-_IMPORT_DATE_COLS = {"erdat", "gbdat", "updat", "qssysdat", "rgdate", "rnedate"}
-_IMPORT_TIME_COLS = {"uptim"}
-_IMPORT_NUMERIC_COLS = {"j_sc_capital"}
-_IMPORT_INT_COLS = {"staging_time"}
-
-
-def _parse_xlsx_bytes(content: bytes) -> list[dict]:
-    """Parst XLSX-Bytes und gibt bereinigte Datensätze zurück (synchron, für Thread)."""
-    import openpyxl
-
-    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    ws = wb.active
-    rows_iter = ws.iter_rows(values_only=True)
-    db_headers = [h.lower() for h in next(rows_iter)]
-
-    records = []
-    for raw_row in rows_iter:
-        rec = {}
-        for col, val in zip(db_headers, raw_row):
-            if val is None or val == "":
-                continue
-            if col in _IMPORT_DATE_COLS:
-                if isinstance(val, (datetime, date)):
-                    rec[col] = val.date().isoformat() if isinstance(val, datetime) else val.isoformat()
-                else:
-                    s = str(val).strip()
-                    if s:
-                        rec[col] = s
-            elif col in _IMPORT_TIME_COLS:
-                if isinstance(val, dt_time):
-                    rec[col] = val.strftime("%H:%M:%S")
-                else:
-                    s = str(val).strip()
-                    if s:
-                        rec[col] = s
-            elif col in _IMPORT_NUMERIC_COLS:
-                try:
-                    rec[col] = float(val)
-                except (ValueError, TypeError):
-                    pass
-            elif col in _IMPORT_INT_COLS:
-                try:
-                    rec[col] = int(val)
-                except (ValueError, TypeError):
-                    pass
-            else:
-                s = str(val).strip()
-                if s:
-                    rec[col] = s
-        records.append(rec)
-
-    wb.close()
-    return records
-
-
 @app.get("/api/admin/check-schema")
 async def check_schema(current_user: dict = Depends(get_current_user)):
     """Prüft ob die lfa1-Migration (neue Spalten) bereits ausgeführt wurde."""
@@ -621,57 +564,37 @@ async def check_schema(current_user: dict = Depends(get_current_user)):
     if not current_user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Nur Admins")
     try:
-        # Wenn stras existiert, ist die Migration gelaufen
         supabase.table("lfa1").select("stras").limit(1).execute()
         return {"migrated": True}
     except Exception:
         return {"migrated": False}
 
 
-@app.post("/api/admin/import-lfa1")
-async def import_lfa1(
-    file: UploadFile = File(...),
+class ImportBatchRequest(BaseModel):
+    records: list[dict]
+
+
+@app.post("/api/admin/import-lfa1-batch")
+async def import_lfa1_batch(
+    body: ImportBatchRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """XLSX-Datei hochladen und in lfa1 importieren (nur Admins)."""
+    """Batch von LFA1-Datensätzen (JSON) in Supabase speichern (nur Admins).
+    Das XLSX wird client-seitig im Browser geparst und in Batches gesendet."""
     _require_db()
     if not current_user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Nur Admins können Daten importieren")
 
-    filename = file.filename or ""
-    if not filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Nur XLSX-Dateien werden unterstützt")
-
-    content = await file.read()
-    logger.info(f"Import gestartet: {filename} ({len(content)} Bytes) von {current_user['username']}")
+    if not body.records:
+        return {"imported": 0, "total": 0}
 
     try:
-        records = await asyncio.to_thread(_parse_xlsx_bytes, content)
+        supabase.table("lfa1").upsert(body.records, on_conflict="lifnr").execute()
+        logger.info(f"Import-Batch: {len(body.records)} Datensätze von {current_user['username']}")
+        return {"imported": len(body.records)}
     except Exception as e:
-        logger.error(f"XLSX-Parse-Fehler: {e}")
-        raise HTTPException(status_code=422, detail=f"Fehler beim Lesen der Datei: {e}")
-
-    total = len(records)
-    batch_size = 500
-    imported = 0
-    batch_errors = []
-
-    for i in range(0, total, batch_size):
-        batch = records[i: i + batch_size]
-        try:
-            supabase.table("lfa1").upsert(batch, on_conflict="lifnr").execute()
-            imported += len(batch)
-        except Exception as e:
-            msg = f"Batch {i // batch_size + 1}: {e}"
-            logger.error(msg)
-            batch_errors.append(msg)
-
-    logger.info(f"Import abgeschlossen: {imported}/{total} Datensätze")
-    return {
-        "imported": imported,
-        "total": total,
-        "errors": batch_errors,
-    }
+        logger.error(f"Import-Batch-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")
