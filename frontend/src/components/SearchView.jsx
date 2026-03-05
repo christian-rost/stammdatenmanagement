@@ -157,33 +157,6 @@ function SearchView({ fetchWithAuth, onGoToDuplicate }) {
             overflowY: 'auto',
           }}>
 
-            {/* Datensatz-Details */}
-            <div style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 8, padding: '1rem',
-              fontSize: '0.85rem',
-            }}>
-              <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--color-navy)' }}>
-                {selected.name1}
-                {selected.loevm && (
-                  <span style={{ marginLeft: '0.5rem', color: 'var(--color-error)', fontSize: '0.75rem' }}>
-                    Löschvormerkung
-                  </span>
-                )}
-              </div>
-              {Object.entries(selected)
-                .filter(([, v]) => v !== null && v !== '')
-                .map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.2rem' }}>
-                    <span style={{ color: 'var(--color-text-light)', minWidth: 90, flexShrink: 0 }}>
-                      {k.toUpperCase()}
-                    </span>
-                    <span style={{ wordBreak: 'break-all' }}>{String(v)}</span>
-                  </div>
-                ))}
-            </div>
-
             {/* Dubletten-Bereich */}
             <div style={{
               background: 'var(--color-surface)',
@@ -231,6 +204,33 @@ function SearchView({ fetchWithAuth, onGoToDuplicate }) {
                   </button>
                 </>
               )}
+            </div>
+
+            {/* Datensatz-Details */}
+            <div style={{
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 8, padding: '1rem',
+              fontSize: '0.85rem',
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--color-navy)' }}>
+                {selected.name1}
+                {selected.loevm && (
+                  <span style={{ marginLeft: '0.5rem', color: 'var(--color-error)', fontSize: '0.75rem' }}>
+                    Löschvormerkung
+                  </span>
+                )}
+              </div>
+              {Object.entries(selected)
+                .filter(([, v]) => v !== null && v !== '')
+                .map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                    <span style={{ color: 'var(--color-text-light)', minWidth: 90, flexShrink: 0 }}>
+                      {k.toUpperCase()}
+                    </span>
+                    <span style={{ wordBreak: 'break-all' }}>{String(v)}</span>
+                  </div>
+                ))}
             </div>
 
           </div>
