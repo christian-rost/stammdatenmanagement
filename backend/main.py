@@ -557,6 +557,35 @@ async def save_fuzzy_decision(
 
 # --- Import endpoint ---
 
+_SEARCH_FIELDS = [
+    "lifnr", "name1", "name2", "name3", "name4",
+    "ort01", "ort02", "stras", "pstlz", "regio",
+    "land1", "telf1", "telf2", "telfx",
+    "stceg", "stcd1", "stcd2", "stenr",
+    "brsch", "sortl", "mcod1", "ernam",
+    "adrnr", "ktokk", "spras",
+]
+
+
+@app.get("/api/search", response_model=list[DubletteRecord])
+async def search_records(
+    q: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Freitextsuche über alle relevanten LFA1-Felder."""
+    _require_db()
+    q = q.strip()
+    if len(q) < 1:
+        return []
+    try:
+        or_filter = ",".join(f"{f}.ilike.%{q}%" for f in _SEARCH_FIELDS)
+        resp = supabase.table("lfa1").select("*").or_(or_filter).limit(500).execute()
+        return resp.data or []
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail="Suche fehlgeschlagen")
+
+
 @app.get("/api/admin/check-schema")
 async def check_schema(current_user: dict = Depends(get_current_user)):
     """Prüft ob die lfa1-Migration (neue Spalten) bereits ausgeführt wurde."""

@@ -6,11 +6,12 @@ import DublettenDetail from './components/DublettenDetail.jsx'
 import FuzzyList from './components/FuzzyList.jsx'
 import FuzzyDetail from './components/FuzzyDetail.jsx'
 import ImportModal from './components/ImportModal.jsx'
+import SearchView from './components/SearchView.jsx'
 
 function App() {
   const { user, loading, logout, fetchWithAuth, isAuthenticated } = useAuth()
 
-  // Mode: 'exact' | 'fuzzy'
+  // Mode: 'exact' | 'fuzzy' | 'search'
   const [mode, setMode] = useState('exact')
 
   // Exact duplicates state
@@ -162,6 +163,12 @@ function App() {
             >
               Ähnlich
             </button>
+            <button
+              className={`mode-tab ${mode === 'search' ? 'active' : ''}`}
+              onClick={() => setMode('search')}
+            >
+              Suche
+            </button>
           </div>
         </div>
         <div className="header-user">
@@ -178,8 +185,10 @@ function App() {
         </div>
       </header>
 
-      <main className="main-content">
-        {mode === 'exact' ? (
+      <main className="main-content" style={mode === 'search' ? { padding: 0 } : undefined}>
+        {mode === 'search' ? (
+          <SearchView fetchWithAuth={fetchWithAuth} />
+        ) : mode === 'exact' ? (
           <>
             <DublettenList
               groups={groups}
