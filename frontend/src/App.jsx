@@ -187,7 +187,13 @@ function App() {
 
       <main className="main-content" style={mode === 'search' ? { padding: 0 } : undefined}>
         {mode === 'search' ? (
-          <SearchView fetchWithAuth={fetchWithAuth} />
+          <SearchView
+            fetchWithAuth={fetchWithAuth}
+            onGoToDuplicate={group => {
+              setSelectedGroup(groups.find(g => g.name1 === group.name1 && g.ort01 === group.ort01) || { ...group, anzahl: 0, lifnr_liste: [], status: 'offen' })
+              setMode('exact')
+            }}
+          />
         ) : mode === 'exact' ? (
           <>
             <DublettenList
