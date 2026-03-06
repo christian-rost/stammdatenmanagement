@@ -669,13 +669,21 @@ _SYSTEM_PROMPT = """Du bist ein SQL-Experte für SAP-Stammdaten und Dubletten-Be
 Analysiere die vom Anwender beschriebene Regel und erzeuge ein PostgreSQL-SELECT-Statement.
 
 """ + _LFA1_SCHEMA_CONTEXT + """
+WICHTIG — Einschränkungen:
+- Es existiert NUR die Tabelle `lfa1`. Keine anderen Tabellen (kein lfbk, lfa3, lfm1, knb1 o. ä.).
+- Bankverbindungen, Einkaufsorganisationen, Buchungskreisdaten etc. sind NICHT verfügbar.
+- Falls eine Regel Daten erfordert, die nicht in lfa1 vorhanden sind (z. B. Bankverbindung),
+  erkläre das in "erklaerung" und erstelle das SQL auf Basis der verfügbaren lfa1-Felder
+  so gut wie möglich — oder gib eine leere Treffermenge zurück mit einem klaren Hinweis.
+
 Das SQL muss folgende Anforderungen erfüllen:
 1. Reines SELECT-Statement (kein INSERT/UPDATE/DELETE/DDL)
-2. Gibt mindestens die Spalten zurück: lifnr, name1, ort01
-3. Enthält NUR Datensätze, die zu Dubletten-Gruppen gehören (Unterabfrage mit HAVING COUNT(*) > 1)
-4. Setzt die beschriebene Regel als WHERE-Bedingung um
-5. Sortiert nach name1, ort01, lifnr
-6. Hat LIMIT 1000
+2. Verwendet NUR die Tabelle `lfa1` — keine JOINs auf andere Tabellen
+3. Gibt mindestens die Spalten zurück: lifnr, name1, ort01
+4. Enthält NUR Datensätze, die zu Dubletten-Gruppen gehören (Unterabfrage mit HAVING COUNT(*) > 1)
+5. Setzt die beschriebene Regel als WHERE-Bedingung um
+6. Sortiert nach name1, ort01, lifnr
+7. Hat LIMIT 1000
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Markdown, kein anderer Text):
 {
