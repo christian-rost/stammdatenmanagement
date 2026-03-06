@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS fuzzy_entscheidungen (
 --   Nutzt set_limit() + %-Operator → GiST-Index wird verwendet
 --   threshold: Schwellwert 0.0–1.0 (Standard 0.6)
 --   Exakte Dubletten (gleicher Name + Stadt) werden ausgeschlossen
-CREATE OR REPLACE FUNCTION get_fuzzy_duplicates(threshold float DEFAULT 0.6)
+CREATE OR REPLACE FUNCTION get_fuzzy_duplicates(threshold float DEFAULT 0.75)
 RETURNS TABLE (
     lifnr_a      varchar,
     name1_a      varchar,

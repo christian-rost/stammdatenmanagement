@@ -501,7 +501,7 @@ class FuzzyEntscheidungRequest(BaseModel):
 
 @app.get("/api/fuzzy", response_model=list[FuzzyPair])
 async def list_fuzzy(
-    threshold: float = 0.6,
+    threshold: float = 0.75,
     current_user: dict = Depends(get_current_user)
 ):
     """Ähnliche Paare via Trigram-Ähnlichkeit."""

@@ -28,7 +28,7 @@ function App() {
   const [selectedPair, setSelectedPair] = useState(null)
   const [loadingFuzzy, setLoadingFuzzy] = useState(false)
   const [filterFuzzy, setFilterFuzzy] = useState('offen')
-  const [threshold, setThreshold] = useState(0.6)
+  const [threshold, setThreshold] = useState(0.75)
   const [fuzzyLoaded, setFuzzyLoaded] = useState(false)
 
   const [exporting, setExporting] = useState(false)
