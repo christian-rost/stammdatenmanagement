@@ -194,7 +194,13 @@ function App() {
 
       <main className="main-content" style={mode === 'search' || mode === 'regeln' ? { padding: 0 } : undefined}>
         {mode === 'regeln' ? (
-          <RegelView fetchWithAuth={fetchWithAuth} />
+          <RegelView
+            fetchWithAuth={fetchWithAuth}
+            onGoToDuplicate={group => {
+              setSelectedGroup(groups.find(g => g.name1 === group.name1 && g.ort01 === group.ort01) || { ...group, anzahl: 0, lifnr_liste: [], status: 'offen' })
+              setMode('exact')
+            }}
+          />
         ) : mode === 'search' ? (
           <SearchView
             fetchWithAuth={fetchWithAuth}
