@@ -8,3 +8,5 @@ passlib[bcrypt]>=1.7.4
 bcrypt==4.0.1
 slowapi>=0.1.9
 supabase>=2.0.0
+anthropic>=0.49.0
+psycopg2-binary>=2.9.0

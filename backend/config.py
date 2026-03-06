@@ -22,6 +22,13 @@ if not JWT_SECRET:
         "Generate one with: openssl rand -base64 32"
     )
 
+# Claude / Anthropic
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# Direkte PostgreSQL-Verbindung für Regelausführung (arbitrary SQL)
+# Format: postgresql://postgres:PASSWORD@HOST:PORT/postgres
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "")
+
 # Admin Credentials
 admin_user = os.getenv("admin_user", "")
 admin_pw = os.getenv("admin_pw", "")

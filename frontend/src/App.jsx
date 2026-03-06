@@ -7,11 +7,12 @@ import FuzzyList from './components/FuzzyList.jsx'
 import FuzzyDetail from './components/FuzzyDetail.jsx'
 import ImportModal from './components/ImportModal.jsx'
 import SearchView from './components/SearchView.jsx'
+import RegelView from './components/RegelView.jsx'
 
 function App() {
   const { user, loading, logout, fetchWithAuth, isAuthenticated } = useAuth()
 
-  // Mode: 'exact' | 'fuzzy' | 'search'
+  // Mode: 'exact' | 'fuzzy' | 'search' | 'regeln'
   const [mode, setMode] = useState('exact')
 
   // Exact duplicates state
@@ -169,6 +170,12 @@ function App() {
             >
               Suche
             </button>
+            <button
+              className={`mode-tab ${mode === 'regeln' ? 'active' : ''}`}
+              onClick={() => setMode('regeln')}
+            >
+              Regeln
+            </button>
           </div>
         </div>
         <div className="header-user">
@@ -185,8 +192,10 @@ function App() {
         </div>
       </header>
 
-      <main className="main-content" style={mode === 'search' ? { padding: 0 } : undefined}>
-        {mode === 'search' ? (
+      <main className="main-content" style={mode === 'search' || mode === 'regeln' ? { padding: 0 } : undefined}>
+        {mode === 'regeln' ? (
+          <RegelView fetchWithAuth={fetchWithAuth} />
+        ) : mode === 'search' ? (
           <SearchView
             fetchWithAuth={fetchWithAuth}
             onGoToDuplicate={group => {

@@ -1,9 +1,14 @@
 """Main FastAPI application for Stammdatenmanagement / Dubletten-Bereinigung."""
 import csv
 import io
+import json
 import logging
+import re
 from typing import Optional
 
+import anthropic
+import psycopg2
+import psycopg2.extras
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -13,7 +18,10 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from supabase import create_client, Client
 
-from .config import CORS_ORIGINS, PORT, supabase_url, supabase_key, admin_user, admin_pw
+from .config import (
+    CORS_ORIGINS, PORT, supabase_url, supabase_key, admin_user, admin_pw,
+    ANTHROPIC_API_KEY, SUPABASE_DB_URL,
+)
 from .auth import create_access_token, authenticate_user, get_current_user
 from .user_storage import create_user, get_user_by_username
 
@@ -623,6 +631,214 @@ async def import_lfa1_batch(
         return {"imported": len(body.records)}
     except Exception as e:
         logger.error(f"Import-Batch-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Regel-Assistent (LLM + SQL) ---
+
+_LFA1_SCHEMA_CONTEXT = """
+Die Tabelle `lfa1` enthält SAP-Kreditoren-Stammdaten mit folgenden Schlüsselspalten:
+- lifnr TEXT: Kreditornummer (eindeutige ID, Primary Key)
+- name1 TEXT: Kreditorname 1 (Hauptname)
+- name2 TEXT: Kreditorname 2 (Zusatz)
+- name3 TEXT: Kreditorname 3
+- name4 TEXT: Kreditorname 4
+- ort01 TEXT: Ort/Stadt
+- stras TEXT: Straße + Hausnummer
+- pstlz TEXT: Postleitzahl
+- land1 TEXT: Länderkennzeichen (z.B. 'DE', 'AT', 'CH')
+- stceg TEXT: USt-IdNr (Umsatzsteuer-Identifikationsnummer)
+- stcd1 TEXT: Steuernummer 1
+- stcd2 TEXT: Steuernummer 2
+- telf1 TEXT: Telefon 1
+- telf2 TEXT: Telefon 2
+- telfx TEXT: Telefax
+- brsch TEXT: Branchenschlüssel
+- ktokk TEXT: Kontengruppe des Kreditors
+- loevm TEXT: Löschvormerkung ('X' = zum Löschen vorgemerkt, NULL = aktiv)
+- erdat DATE: Anlagedatum
+- ernam TEXT: Angelegt von (Benutzername)
+- sortl TEXT: Suchbegriff
+- mandt TEXT: Mandant (immer '100')
+
+Eine "Dubletten-Gruppe" besteht aus allen Datensätzen mit identischem name1 UND COALESCE(ort01,'')
+bei denen COUNT(*) > 1 ist.
+"""
+
+_SYSTEM_PROMPT = """Du bist ein SQL-Experte für SAP-Stammdaten und Dubletten-Bereinigung.
+Analysiere die vom Anwender beschriebene Regel und erzeuge ein PostgreSQL-SELECT-Statement.
+
+""" + _LFA1_SCHEMA_CONTEXT + """
+Das SQL muss folgende Anforderungen erfüllen:
+1. Reines SELECT-Statement (kein INSERT/UPDATE/DELETE/DDL)
+2. Gibt mindestens die Spalten zurück: lifnr, name1, ort01
+3. Enthält NUR Datensätze, die zu Dubletten-Gruppen gehören (Unterabfrage mit HAVING COUNT(*) > 1)
+4. Setzt die beschriebene Regel als WHERE-Bedingung um
+5. Sortiert nach name1, ort01, lifnr
+6. Hat LIMIT 1000
+
+Antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Markdown, kein anderer Text):
+{
+  "sql": "SELECT ... FROM lfa1 ...",
+  "erklaerung": "Kurze deutsche Erklärung was das SQL macht",
+  "aktion": "ignorieren",
+  "aktion_erklaerung": "Kurze deutsche Erklärung der vorgeschlagenen Aktion"
+}
+
+Für "aktion" wähle:
+- "ignorieren": Alle Kreditoren der Gruppe bleiben bestehen (keine Löschung nötig)
+- "pruefen": Manuelle Einzelprüfung empfohlen
+"""
+
+
+def _validate_sql(sql: str) -> None:
+    """Sicherheitsprüfung: nur SELECT erlaubt."""
+    normalized = sql.strip().upper()
+    if not normalized.startswith("SELECT"):
+        raise HTTPException(status_code=400, detail="Nur SELECT-Statements sind erlaubt")
+    forbidden = re.compile(
+        r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|EXECUTE|EXEC|CALL)\b",
+        re.IGNORECASE,
+    )
+    if forbidden.search(sql):
+        raise HTTPException(status_code=400, detail="SQL enthält unerlaubte Operationen")
+
+
+class RuleGenerateRequest(BaseModel):
+    regel: str
+
+
+class RuleGenerateResponse(BaseModel):
+    sql: str
+    erklaerung: str
+    aktion: str
+    aktion_erklaerung: str
+
+
+class RuleExecuteRequest(BaseModel):
+    sql: str
+
+
+class RuleApplyRequest(BaseModel):
+    groups: list[dict]   # [{name1, ort01}, ...]
+    status: str = "ignoriert"
+    notiz: Optional[str] = None
+
+
+@app.post("/api/rules/generate-sql", response_model=RuleGenerateResponse)
+async def generate_rule_sql(
+    body: RuleGenerateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Erzeugt ein SQL-Statement aus einer Klartextregel via Claude API."""
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY nicht konfiguriert")
+
+    regel = body.regel.strip()
+    if len(regel) < 5:
+        raise HTTPException(status_code=400, detail="Regel zu kurz")
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=2048,
+            system=_SYSTEM_PROMPT,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Erstelle ein SQL-Statement für folgende Regel:\n\n{regel}",
+                }
+            ],
+        )
+        raw = response.content[0].text.strip()
+
+        # JSON aus der Antwort extrahieren
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        data = json.loads(raw)
+
+        sql = data.get("sql", "").strip()
+        if not sql:
+            raise HTTPException(status_code=500, detail="LLM hat kein SQL zurückgegeben")
+
+        _validate_sql(sql)
+
+        return RuleGenerateResponse(
+            sql=sql,
+            erklaerung=data.get("erklaerung", ""),
+            aktion=data.get("aktion", "ignorieren"),
+            aktion_erklaerung=data.get("aktion_erklaerung", ""),
+        )
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        logger.error(f"LLM JSON parse error: {e} | raw: {raw[:500]}")
+        raise HTTPException(status_code=500, detail="LLM-Antwort konnte nicht verarbeitet werden")
+    except Exception as e:
+        logger.error(f"Rule generate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rules/execute")
+async def execute_rule_sql(
+    body: RuleExecuteRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Führt ein validiertes SELECT-Statement direkt gegen die Datenbank aus."""
+    if not SUPABASE_DB_URL:
+        raise HTTPException(status_code=503, detail="SUPABASE_DB_URL nicht konfiguriert")
+
+    _validate_sql(body.sql)
+
+    try:
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(body.sql)
+                rows = cur.fetchall()
+                return {"rows": [dict(r) for r in rows], "count": len(rows)}
+        finally:
+            conn.close()
+    except psycopg2.Error as e:
+        logger.error(f"SQL execution error: {e}")
+        raise HTTPException(status_code=400, detail=f"SQL-Fehler: {e.pgerror or str(e)}")
+    except Exception as e:
+        logger.error(f"Execute error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rules/apply")
+async def apply_rule(
+    body: RuleApplyRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Wendet eine Entscheidung auf mehrere Dubletten-Gruppen an (Batch-Upsert)."""
+    _require_db()
+    if not body.groups:
+        return {"applied": 0}
+
+    records = [
+        {
+            "name1": g["name1"],
+            "ort01": g.get("ort01", ""),
+            "status": body.status,
+            "notiz": body.notiz,
+            "bearbeitet_von": current_user["username"],
+            "lifnr_behalten": None,
+            "lifnr_loeschen": [],
+        }
+        for g in body.groups
+    ]
+
+    try:
+        supabase.table("dubletten_entscheidungen").upsert(
+            records, on_conflict="name1,ort01"
+        ).execute()
+        logger.info(f"Rule applied to {len(records)} groups by {current_user['username']}")
+        return {"applied": len(records)}
+    except Exception as e:
+        logger.error(f"Rule apply error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
