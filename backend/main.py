@@ -41,7 +41,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -733,6 +733,21 @@ class RuleApplyRequest(BaseModel):
     notiz: Optional[str] = None
 
 
+class RegelVorlageCreate(BaseModel):
+    name: str
+    regel: str
+    sql_text: str
+    erklaerung: str = ""
+    aktion: str = "ignorieren"
+    aktion_erklaerung: str = ""
+
+
+class RegelVorlageStatsUpdate(BaseModel):
+    letzte_ausfuehrung: str  # ISO timestamp
+    letztes_ergebnis_anzahl: int
+    letztes_ergebnis_offen: int
+
+
 @app.post("/api/rules/generate-sql", response_model=RuleGenerateResponse)
 async def generate_rule_sql(
     body: RuleGenerateRequest,
@@ -805,7 +820,36 @@ async def execute_rule_sql(
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(body.sql)
                 rows = cur.fetchall()
-                return {"rows": [dict(r) for r in rows], "count": len(rows)}
+                result_rows = [dict(r) for r in rows]
+
+                # Gruppen aus dem Ergebnis ableiten (distinct name1+ort01)
+                seen_groups: set = set()
+                for r in result_rows:
+                    key = (r.get("name1") or "", r.get("ort01") or "")
+                    seen_groups.add(key)
+                groups_total = len(seen_groups)
+
+                # Wie viele dieser Gruppen sind bereits bereinigt?
+                groups_offen = groups_total
+                if seen_groups and supabase:
+                    try:
+                        decisions_resp = supabase.table("dubletten_entscheidungen") \
+                            .select("name1,ort01,status").execute()
+                        done_keys = {
+                            (d["name1"], d["ort01"])
+                            for d in (decisions_resp.data or [])
+                            if d.get("status") in ("bearbeitet", "ignoriert")
+                        }
+                        groups_offen = sum(1 for g in seen_groups if g not in done_keys)
+                    except Exception:
+                        pass  # Statistik ist optional
+
+                return {
+                    "rows": result_rows,
+                    "count": len(result_rows),
+                    "groups_total": groups_total,
+                    "groups_offen": groups_offen,
+                }
         finally:
             conn.close()
     except psycopg2.Error as e:
@@ -848,6 +892,76 @@ async def apply_rule(
     except Exception as e:
         logger.error(f"Rule apply error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/rules/saved")
+async def list_saved_rules(current_user: dict = Depends(get_current_user)):
+    """Alle gespeicherten Regel-Vorlagen."""
+    _require_db()
+    try:
+        resp = supabase.table("regel_vorlagen").select("*").order("erstellt_am", desc=True).execute()
+        return resp.data or []
+    except Exception as e:
+        logger.error(f"Error listing saved rules: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Laden der Regeln")
+
+
+@app.post("/api/rules/saved", status_code=201)
+async def create_saved_rule(
+    body: RegelVorlageCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Neue Regel-Vorlage speichern."""
+    _require_db()
+    try:
+        data = {
+            "name": body.name,
+            "regel": body.regel,
+            "sql_text": body.sql_text,
+            "erklaerung": body.erklaerung,
+            "aktion": body.aktion,
+            "aktion_erklaerung": body.aktion_erklaerung,
+            "erstellt_von": current_user["username"],
+        }
+        resp = supabase.table("regel_vorlagen").insert(data).execute()
+        return resp.data[0] if resp.data else {}
+    except Exception as e:
+        logger.error(f"Error saving rule: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Speichern der Regel")
+
+
+@app.delete("/api/rules/saved/{rule_id}", status_code=204)
+async def delete_saved_rule(
+    rule_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Gespeicherte Regel-Vorlage löschen."""
+    _require_db()
+    try:
+        supabase.table("regel_vorlagen").delete().eq("id", rule_id).execute()
+    except Exception as e:
+        logger.error(f"Error deleting rule {rule_id}: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Löschen der Regel")
+
+
+@app.patch("/api/rules/saved/{rule_id}/stats")
+async def update_rule_stats(
+    rule_id: int,
+    body: RegelVorlageStatsUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Ausführungsstatistik einer gespeicherten Regel aktualisieren."""
+    _require_db()
+    try:
+        supabase.table("regel_vorlagen").update({
+            "letzte_ausfuehrung": body.letzte_ausfuehrung,
+            "letztes_ergebnis_anzahl": body.letztes_ergebnis_anzahl,
+            "letztes_ergebnis_offen": body.letztes_ergebnis_offen,
+        }).eq("id", rule_id).execute()
+        return {"updated": True}
+    except Exception as e:
+        logger.error(f"Error updating rule stats {rule_id}: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Aktualisieren der Statistik")
 
 
 @app.get("/")
