@@ -42,16 +42,19 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
 
   // --- "Neue Regel" Tab state ---
   const [regel, setRegel]           = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [genError, setGenError]     = useState('')
-
   const [sql, setSql]               = useState('')
   const [erklaerung, setErklaerung] = useState('')
   const [aktion, setAktion]         = useState('ignorieren')
   const [aktionErkl, setAktionErkl] = useState('')
 
-  const [executing, setExecuting]   = useState(false)
+  const [running, setRunning]       = useState(false)
+  const [runPhase, setRunPhase]     = useState('') // 'generating' | 'executing'
+  const [genError, setGenError]     = useState('')
   const [execError, setExecError]   = useState('')
+
+  const [showSql, setShowSql]       = useState(false)
+  const [sqlEdited, setSqlEdited]   = useState(false)
+
   const [rows, setRows]             = useState(null)
   const [groupsTotal, setGroupsTotal] = useState(0)
   const [groupsOffen, setGroupsOffen] = useState(0)
@@ -69,7 +72,7 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
   const [saving, setSaving]               = useState(false)
   const [saveMsg, setSaveMsg]             = useState('')
 
-  // Currently loaded saved rule (for stats update after execute)
+  // Currently loaded saved rule
   const [loadedRuleId, setLoadedRuleId]   = useState(null)
 
   // --- "Gespeicherte Regeln" Tab state ---
@@ -78,7 +81,6 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
   const [rulesError, setRulesError]       = useState('')
   const [deletingId, setDeletingId]       = useState(null)
 
-  // Load saved rules when switching to that tab
   useEffect(() => {
     if (activeTab === 'saved') loadSavedRules()
   }, [activeTab])
@@ -94,7 +96,6 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
     finally { setLoadingRules(false) }
   }, [fetchWithAuth])
 
-  // Dubletten laden wenn ein Datensatz selektiert wird
   useEffect(() => {
     if (!selected) { setDuplicates(null); return }
     setLoadingDups(true)
@@ -107,62 +108,28 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
       .finally(() => setLoadingDups(false))
   }, [selected?.lifnr])
 
-  async function handleGenerate() {
-    setGenError('')
-    setRows(null)
-    setSelected(null)
-    setApplyMsg('')
-    setShowSaveForm(false)
-    setSaveMsg('')
-    setLoadedRuleId(null)
-    setGenerating(true)
-    try {
-      const resp = await fetchWithAuth('/api/rules/generate-sql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ regel }),
-      })
-      if (!resp.ok) {
-        const d = await resp.json()
-        setGenError(d.detail || 'Fehler beim Generieren')
-        return
-      }
-      const d = await resp.json()
-      setSql(d.sql)
-      setErklaerung(d.erklaerung)
-      setAktion(d.aktion)
-      setAktionErkl(d.aktion_erklaerung)
-    } catch {
-      setGenError('Verbindungsfehler')
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  async function handleExecute() {
-    setExecError('')
-    setApplyMsg('')
-    setSelected(null)
-    setExecuting(true)
+  // Core execute function — runs given SQL and updates results
+  async function executeSQL(sqlToRun, ruleId) {
+    setRunPhase('executing')
     try {
       const resp = await fetchWithAuth('/api/rules/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({ sql: sqlToRun }),
       })
       if (!resp.ok) {
         const d = await resp.json()
         setExecError(d.detail || 'SQL-Fehler')
-        return
+        setShowSql(true) // Auto-aufklappen bei Fehler
+        return false
       }
       const d = await resp.json()
       setRows(d.rows)
       setGroupsTotal(d.groups_total ?? 0)
       setGroupsOffen(d.groups_offen ?? 0)
 
-      // Wenn eine gespeicherte Regel geladen ist → Stats aktualisieren
-      if (loadedRuleId) {
-        fetchWithAuth(`/api/rules/saved/${loadedRuleId}/stats`, {
+      if (ruleId) {
+        fetchWithAuth(`/api/rules/saved/${ruleId}/stats`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -172,11 +139,74 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
           }),
         }).catch(() => {})
       }
+      return true
     } catch {
       setExecError('Verbindungsfehler')
-    } finally {
-      setExecuting(false)
+      setShowSql(true)
+      return false
     }
+  }
+
+  // Haupt-Handler: generiert SQL falls nötig, führt dann aus
+  async function handleRunRule() {
+    setGenError('')
+    setExecError('')
+    setRows(null)
+    setSelected(null)
+    setApplyMsg('')
+    setShowSaveForm(false)
+    setSaveMsg('')
+    setRunning(true)
+
+    let currentSql = sql.trim()
+
+    // SQL generieren wenn noch keines vorhanden oder manuell editiert
+    if (!currentSql || sqlEdited) {
+      setRunPhase('generating')
+      try {
+        const resp = await fetchWithAuth('/api/rules/generate-sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ regel }),
+        })
+        if (!resp.ok) {
+          const d = await resp.json()
+          setGenError(d.detail || 'Fehler beim Generieren')
+          setRunning(false)
+          setRunPhase('')
+          return
+        }
+        const d = await resp.json()
+        currentSql = d.sql
+        setSql(d.sql)
+        setErklaerung(d.erklaerung)
+        setAktion(d.aktion)
+        setAktionErkl(d.aktion_erklaerung)
+        setSqlEdited(false)
+      } catch {
+        setGenError('Verbindungsfehler')
+        setRunning(false)
+        setRunPhase('')
+        return
+      }
+    }
+
+    await executeSQL(currentSql, loadedRuleId)
+    setRunning(false)
+    setRunPhase('')
+  }
+
+  // Handler für "SQL neu ausführen" nach manueller Bearbeitung
+  async function handleRerunSql() {
+    setExecError('')
+    setRows(null)
+    setSelected(null)
+    setApplyMsg('')
+    setRunning(true)
+    await executeSQL(sql, loadedRuleId)
+    setSqlEdited(false)
+    setRunning(false)
+    setRunPhase('')
   }
 
   function getGroups() {
@@ -251,7 +281,8 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
     }
   }
 
-  function handleLoadRule(rule) {
+  async function handleLoadRule(rule) {
+    // Zustand zurücksetzen und Regel laden
     setRegel(rule.regel)
     setSql(rule.sql_text)
     setErklaerung(rule.erklaerung || '')
@@ -264,10 +295,16 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
     setExecError('')
     setSaveMsg('')
     setShowSaveForm(false)
+    setShowSql(false)
+    setSqlEdited(false)
     setLoadedRuleId(rule.id)
     setActiveTab('neu')
-    // Auto-execute
-    setTimeout(() => document.getElementById('btn-execute')?.click(), 100)
+
+    // Direkt ausführen mit dem gespeicherten SQL (kein LLM nötig)
+    setRunning(true)
+    await executeSQL(rule.sql_text, rule.id)
+    setRunning(false)
+    setRunPhase('')
   }
 
   async function handleDeleteRule(id) {
@@ -283,11 +320,16 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
     setSql(''); setErklaerung(''); setAktion('ignorieren'); setAktionErkl('')
     setRows(null); setSelected(null); setGenError(''); setExecError(''); setApplyMsg('')
     setShowSaveForm(false); setSaveMsg(''); setLoadedRuleId(null)
+    setShowSql(false); setSqlEdited(false)
   }
 
-  const groups     = getGroups()
-  const hasSql     = sql.trim().length > 0
+  const groups        = getGroups()
+  const hasSql        = sql.trim().length > 0
   const hasDuplicates = duplicates && duplicates.length > 1
+
+  const runLabel = runPhase === 'generating' ? 'Generiere SQL…'
+    : runPhase === 'executing' ? 'Führe aus…'
+    : 'Regel ausführen'
 
   const resultCols = rows && rows.length > 0
     ? DISPLAY_COLUMNS.filter(c => rows.some(r => r[c.key] !== undefined && r[c.key] !== null && r[c.key] !== ''))
@@ -344,108 +386,113 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
                 style={{ width: '100%', minHeight: 72, resize: 'vertical', fontFamily: 'inherit', padding: '0.6rem 0.8rem' }}
                 placeholder="z. B.: Kreditoren mit gleicher Anschrift aber unterschiedlicher USt-IdNr → alle behalten"
                 value={regel}
-                onChange={e => setRegel(e.target.value)}
-                disabled={generating}
+                onChange={e => {
+                  setRegel(e.target.value)
+                  // SQL invalidieren wenn Regeltext geändert wird (außer bei geladener Regel)
+                  if (hasSql && !loadedRuleId) { setSql(''); setSqlEdited(false) }
+                }}
+                disabled={running}
               />
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.6rem' }}>
+
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.6rem', alignItems: 'center' }}>
                 <button
                   className="btn btn-primary"
-                  onClick={handleGenerate}
-                  disabled={generating || regel.trim().length < 5}
+                  onClick={handleRunRule}
+                  disabled={running || regel.trim().length < 5}
                 >
-                  {generating ? 'Generiere…' : 'SQL generieren'}
+                  {runLabel}
                 </button>
-                {(sql || rows) && (
-                  <button className="btn btn-secondary" onClick={handleReset}>
+                {(hasSql || rows) && (
+                  <button className="btn btn-secondary" onClick={handleReset} disabled={running}>
                     Zurücksetzen
                   </button>
                 )}
+                {loadedRuleId && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-success)', fontWeight: 500 }}>
+                    Gespeicherte Regel geladen
+                  </span>
+                )}
               </div>
+
               {genError && <div className="import-result import-result--error" style={{ marginTop: '0.75rem' }}>{genError}</div>}
             </div>
 
-            {/* SQL-Vorschau */}
+            {/* Erklärung (immer sichtbar nach Ausführung) */}
+            {erklaerung && (
+              <div style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 6, padding: '0.6rem 1rem',
+                fontSize: '0.85rem', marginBottom: '0.75rem',
+                color: 'var(--color-text-light)',
+              }}>
+                <strong style={{ color: 'var(--color-navy)' }}>Erklärung: </strong>{erklaerung}
+                {aktionErkl && (
+                  <div style={{ marginTop: '0.3rem' }}>
+                    <strong style={{ color: 'var(--color-navy)' }}>Vorgeschlagene Aktion: </strong>{aktionErkl}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SQL-Panel (aufklappbar) */}
             {hasSql && (
               <div style={{ marginBottom: '1rem' }}>
-                {erklaerung && (
-                  <div style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 6, padding: '0.6rem 1rem',
-                    fontSize: '0.85rem', marginBottom: '0.75rem',
-                    color: 'var(--color-text-light)',
-                  }}>
-                    <strong style={{ color: 'var(--color-navy)' }}>Erklärung: </strong>{erklaerung}
-                    {aktionErkl && (
-                      <div style={{ marginTop: '0.3rem' }}>
-                        <strong style={{ color: 'var(--color-navy)' }}>Vorgeschlagene Aktion: </strong>{aktionErkl}
+                <button
+                  onClick={() => setShowSql(v => !v)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--color-text-light)', fontSize: '0.82rem',
+                    padding: '0.2rem 0', display: 'flex', alignItems: 'center', gap: '0.3rem',
+                  }}
+                >
+                  <span style={{ fontSize: '0.7rem' }}>{showSql ? '▾' : '▸'}</span>
+                  SQL {showSql ? 'ausblenden' : 'anzeigen / bearbeiten'}
+                </button>
+
+                {showSql && (
+                  <div style={{ marginTop: '0.4rem' }}>
+                    <textarea
+                      style={{
+                        width: '100%', minHeight: 120, resize: 'vertical',
+                        fontFamily: 'monospace', fontSize: '0.82rem',
+                        padding: '0.6rem 0.8rem',
+                        background: 'var(--color-surface)',
+                        border: `1px solid ${sqlEdited ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                        borderRadius: 6, color: 'var(--color-text)',
+                      }}
+                      value={sql}
+                      onChange={e => { setSql(e.target.value); setSqlEdited(true); setRows(null); setSelected(null); setApplyMsg('') }}
+                    />
+                    {sqlEdited && (
+                      <div style={{ marginTop: '0.4rem' }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleRerunSql}
+                          disabled={running || !sql.trim()}
+                        >
+                          {running ? 'Führe aus…' : 'SQL neu ausführen'}
+                        </button>
                       </div>
                     )}
                   </div>
                 )}
 
-                <label style={{ display: 'block', fontWeight: 600, marginBottom: '0.4rem', fontSize: '0.9rem' }}>
-                  Generiertes SQL <span style={{ fontWeight: 400, color: 'var(--color-text-light)' }}>(bearbeitbar)</span>:
-                </label>
-                <textarea
-                  style={{
-                    width: '100%', minHeight: 120, resize: 'vertical',
-                    fontFamily: 'monospace', fontSize: '0.82rem',
-                    padding: '0.6rem 0.8rem',
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 6, color: 'var(--color-text)',
-                  }}
-                  value={sql}
-                  onChange={e => { setSql(e.target.value); setRows(null); setSelected(null); setApplyMsg('') }}
-                />
+                {execError && <div className="import-result import-result--error" style={{ marginTop: '0.75rem' }}>{execError}</div>}
 
-                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button
-                    id="btn-execute"
-                    className="btn btn-primary"
-                    onClick={handleExecute}
-                    disabled={executing || !sql.trim()}
-                  >
-                    {executing ? 'Ausführen…' : 'SQL ausführen'}
-                  </button>
-
-                  <span style={{ fontSize: '0.82rem', color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    Aktion:
-                    <select
-                      value={aktion}
-                      onChange={e => setAktion(e.target.value)}
-                      style={{
-                        padding: '0.2rem 0.4rem',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 4, fontSize: '0.82rem',
-                        background: 'var(--color-surface)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <option value="ignorieren">Ignorieren (alle behalten)</option>
-                      <option value="pruefen">Zur Prüfung markieren</option>
-                    </select>
-                  </span>
-
-                  {/* Regel speichern Button */}
-                  {!loadedRuleId && !showSaveForm && (
+                {/* Regel speichern */}
+                {hasSql && !loadedRuleId && !showSaveForm && (
+                  <div style={{ marginTop: '0.5rem' }}>
                     <button
                       className="btn btn-secondary"
                       onClick={() => { setShowSaveForm(true); setSaveName('') }}
-                      style={{ marginLeft: 'auto' }}
+                      style={{ fontSize: '0.82rem' }}
                     >
                       Regel speichern…
                     </button>
-                  )}
-                  {loadedRuleId && (
-                    <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--color-success)', fontWeight: 500 }}>
-                      Gespeicherte Regel geladen
-                    </span>
-                  )}
-                </div>
+                  </div>
+                )}
 
-                {/* Inline-Speicherformular */}
                 {showSaveForm && (
                   <div style={{
                     marginTop: '0.75rem',
@@ -477,8 +524,6 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
                     {saveMsg}
                   </div>
                 )}
-
-                {execError && <div className="import-result import-result--error" style={{ marginTop: '0.75rem' }}>{execError}</div>}
               </div>
             )}
           </div>
@@ -496,7 +541,6 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
                       : `${rows.length} Datensätze in ${groupsTotal} Gruppe${groupsTotal !== 1 ? 'n' : ''}`}
                   </span>
 
-                  {/* Statistik-Badge */}
                   {rows.length > 0 && (
                     <span style={{
                       fontSize: '0.8rem',
@@ -506,20 +550,39 @@ function RegelView({ fetchWithAuth, onGoToDuplicate }) {
                       color: groupsOffen === 0 ? 'var(--color-success)' : 'var(--color-primary)',
                       fontWeight: 600,
                     }}>
-                      {groupsOffen === 0
-                        ? 'Alle bereinigt'
-                        : `${groupsOffen} offen`}
+                      {groupsOffen === 0 ? 'Alle bereinigt' : `${groupsOffen} offen`}
                     </span>
                   )}
 
                   {groups.length > 0 && (
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleApply}
-                      disabled={applying || !!applyMsg}
-                    >
-                      {applying ? 'Anwenden…' : `Auf ${groups.length} Gruppe${groups.length !== 1 ? 'n' : ''} anwenden`}
-                    </button>
+                    <>
+                      {/* Aktion-Selektor bei den Ergebnissen */}
+                      <span style={{ fontSize: '0.82rem', color: 'var(--color-text-light)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        Aktion:
+                        <select
+                          value={aktion}
+                          onChange={e => setAktion(e.target.value)}
+                          style={{
+                            padding: '0.2rem 0.4rem',
+                            border: '1px solid var(--color-border)',
+                            borderRadius: 4, fontSize: '0.82rem',
+                            background: 'var(--color-surface)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <option value="ignorieren">Ignorieren (alle behalten)</option>
+                          <option value="pruefen">Zur Prüfung markieren</option>
+                        </select>
+                      </span>
+
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleApply}
+                        disabled={applying || !!applyMsg}
+                      >
+                        {applying ? 'Anwenden…' : `Auf ${groups.length} Gruppe${groups.length !== 1 ? 'n' : ''} anwenden`}
+                      </button>
+                    </>
                   )}
                 </div>
 
