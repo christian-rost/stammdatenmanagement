@@ -489,6 +489,7 @@ class FuzzyPair(BaseModel):
     status: str = "offen"
     lifnr_behalten: Optional[str] = None
     notiz: Optional[str] = None
+    bearbeitet_von: Optional[str] = None
 
 
 class FuzzyEntscheidungRequest(BaseModel):
@@ -531,6 +532,7 @@ async def list_fuzzy(
                 status=dec.get("status", "offen"),
                 lifnr_behalten=dec.get("lifnr_behalten"),
                 notiz=dec.get("notiz"),
+                bearbeitet_von=dec.get("bearbeitet_von"),
             ))
         return result
     except Exception as e:

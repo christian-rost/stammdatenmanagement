@@ -104,9 +104,16 @@ function FuzzyDetail({ pair, fetchWithAuth, onDecisionSaved }) {
           </div>
           <div className="detail-header-sub">Ähnlichkeit: {pct}%</div>
         </div>
-        <span className={`badge badge-${pair.status}`}>
-          {pair.status === 'offen' ? 'Offen' : pair.status === 'bearbeitet' ? 'Erledigt' : 'Ignoriert'}
-        </span>
+        <div style={{ textAlign: 'right' }}>
+          <span className={`badge badge-${pair.status}`}>
+            {pair.status === 'offen' ? 'Offen' : pair.status === 'bearbeitet' ? 'Erledigt' : 'Ignoriert'}
+          </span>
+          {pair.bearbeitet_von && (
+            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: '0.25rem' }}>
+              {pair.bearbeitet_von}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="detail-content">

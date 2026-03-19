@@ -84,9 +84,16 @@ function DublettenDetail({ group, fetchWithAuth, onDecisionSaved }) {
             {group.ort01 || '—'} · {group.anzahl} Datensätze
           </div>
         </div>
-        <span className={`badge badge-${group.status}`}>
-          {group.status === 'offen' ? 'Offen' : group.status === 'bearbeitet' ? 'Erledigt' : 'Ignoriert'}
-        </span>
+        <div style={{ textAlign: 'right' }}>
+          <span className={`badge badge-${group.status}`}>
+            {group.status === 'offen' ? 'Offen' : group.status === 'bearbeitet' ? 'Erledigt' : 'Ignoriert'}
+          </span>
+          {group.bearbeitet_von && (
+            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginTop: '0.25rem' }}>
+              {group.bearbeitet_von}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="detail-content">
