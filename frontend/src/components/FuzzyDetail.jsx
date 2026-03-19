@@ -4,11 +4,22 @@ const FIELDS = [
   { key: 'lifnr', label: 'LIFNR' },
   { key: 'name1', label: 'NAME1' },
   { key: 'name2', label: 'NAME2' },
-  { key: 'name3', label: 'NAME3' },
+  { key: 'stras', label: 'Straße' },
+  { key: 'pstlz', label: 'PLZ' },
   { key: 'ort01', label: 'ORT01' },
-  { key: 'ort02', label: 'ORT02' },
   { key: 'land1', label: 'LAND1' },
+  { key: 'telf1', label: 'Telefon' },
+  { key: 'stceg', label: 'USt-IdNr' },
+  { key: 'erdat', label: 'Angelegt' },
+  { key: 'loevm', label: 'Löschvm.' },
 ]
+
+function getValue(rec, key) {
+  if (!rec) return ''
+  if (key === 'telf1') return rec.telf1 || rec.telf2 || ''
+  if (key === 'erdat') return rec.erdat ? rec.erdat.slice(0, 10) : ''
+  return rec[key] || ''
+}
 
 function FuzzyDetail({ pair, fetchWithAuth, onDecisionSaved }) {
   const [recA, setRecA] = useState(null)
@@ -129,18 +140,23 @@ function FuzzyDetail({ pair, fetchWithAuth, onDecisionSaved }) {
               </thead>
               <tbody>
                 {FIELDS.map(({ key, label }) => {
-                  const vA = recA?.[key] || ''
-                  const vB = recB?.[key] || ''
+                  const vA = getValue(recA, key)
+                  const vB = getValue(recB, key)
                   const differs = vA !== vB
+                  const loevmStyle = key === 'loevm'
+                    ? (val) => val ? { color: 'var(--color-error)' } : { color: 'var(--color-text-light)' }
+                    : () => ({})
                   return (
                     <tr key={key}>
                       <td style={{ fontWeight: 600, fontSize: '0.78rem', color: 'var(--color-text-light)', textTransform: 'uppercase' }}>
                         {label}
                       </td>
-                      <td className={`${lifnrBehalten === pair.lifnr_a ? 'cell-behalten' : ''} ${differs ? 'cell-differs' : ''}`}>
+                      <td className={`${lifnrBehalten === pair.lifnr_a ? 'cell-behalten' : ''} ${differs ? 'cell-differs' : ''}`}
+                          style={loevmStyle(vA)}>
                         {vA || <span style={{ color: 'var(--color-gray)' }}>—</span>}
                       </td>
-                      <td className={`${lifnrBehalten === pair.lifnr_b ? 'cell-behalten' : ''} ${differs ? 'cell-differs' : ''}`}>
+                      <td className={`${lifnrBehalten === pair.lifnr_b ? 'cell-behalten' : ''} ${differs ? 'cell-differs' : ''}`}
+                          style={loevmStyle(vB)}>
                         {vB || <span style={{ color: 'var(--color-gray)' }}>—</span>}
                       </td>
                     </tr>
