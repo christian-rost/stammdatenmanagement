@@ -7,9 +7,11 @@ import re
 from typing import Optional
 
 import anthropic
+import io
+import openpyxl
 import psycopg2
 import psycopg2.extras
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, field_validator
@@ -1303,6 +1305,78 @@ async def import_makt_batch(
         return {"imported": len(body.records)}
     except Exception as e:
         logger.error(f"MAKT-Import-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _sanitize_col(h) -> str:
+    return str(h).lstrip('/').replace('/', '_').lower()
+
+
+def _xlsx_to_records(content: bytes, on_conflict_col: str) -> list[dict]:
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active
+    rows = ws.iter_rows(values_only=True)
+    header_row = next(rows, None)
+    if not header_row:
+        raise ValueError("Keine Kopfzeile gefunden")
+    headers = [_sanitize_col(h) if h is not None else f"col_{i}" for i, h in enumerate(header_row)]
+    records = []
+    for row in rows:
+        if not any(v is not None for v in row):
+            continue
+        rec = {col: (str(v).strip() or None) for col, v in zip(headers, row) if v is not None}
+        if rec.get(on_conflict_col):
+            records.append(rec)
+    wb.close()
+    return records
+
+
+@app.post("/api/admin/upload-mara-xlsx")
+async def upload_mara_xlsx(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """MARA-XLSX serverseitig parsen und in mara-Tabelle importieren (für große Dateien)."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins")
+    try:
+        content = await file.read()
+        records = _xlsx_to_records(content, "matnr")
+        _BATCH = 500
+        for i in range(0, len(records), _BATCH):
+            supabase.table("mara").upsert(records[i:i + _BATCH], on_conflict="matnr").execute()
+        logger.info(f"MARA-Upload: {len(records)} Datensätze von {current_user['username']}")
+        return {"imported": len(records)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"MARA-Upload-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/upload-makt-xlsx")
+async def upload_makt_xlsx(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """MAKT-XLSX serverseitig parsen und in makt-Tabelle importieren."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins")
+    try:
+        content = await file.read()
+        records = _xlsx_to_records(content, "matnr")
+        records = [r for r in records if r.get("spras")]
+        _BATCH = 500
+        for i in range(0, len(records), _BATCH):
+            supabase.table("makt").upsert(records[i:i + _BATCH], on_conflict="matnr,spras").execute()
+        logger.info(f"MAKT-Upload: {len(records)} Datensätze von {current_user['username']}")
+        return {"imported": len(records)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"MAKT-Upload-Fehler: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

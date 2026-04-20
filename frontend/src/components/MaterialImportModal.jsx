@@ -1,105 +1,15 @@
 import { useRef, useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import * as XLSX from 'xlsx'
 
-const BATCH_SIZE = 500
-
-function sanitizeColName(h) {
-  return String(h).replace(/^\/+/, '').replace(/\//g, '_').toLowerCase()
-}
-
-function coerceMara(col, val) {
-  if (val === null || val === undefined) return null
-  const s = String(val).trim()
-  return s === '' ? null : s
-}
-
-function parseXlsxMara(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const wb = XLSX.read(e.target.result, { type: 'array', sheets: 0 })
-        const sheetName = wb.SheetNames?.[0]
-        const ws = sheetName ? wb.Sheets[sheetName] : undefined
-        if (!ws) { reject(new Error(`Kein Tabellenblatt gefunden (SheetNames: ${JSON.stringify(wb?.SheetNames)})`)); return }
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false })
-        if (!raw || raw.length < 2) { reject(new Error('Excel-Datei enthält keine Daten')); return }
-        const [headerRow, ...dataRows] = raw
-        if (!headerRow) { reject(new Error('Keine Spaltenüberschriften gefunden')); return }
-        const headers = headerRow.map(h => sanitizeColName(h))
-
-        const records = dataRows
-          .filter(row => row.some(v => v !== null && v !== ''))
-          .map(row => {
-            const rec = {}
-            headers.forEach((col, i) => {
-              const val = coerceMara(col, row[i])
-              if (val !== null) rec[col] = val
-            })
-            return rec
-          })
-
-        resolve(records)
-      } catch (err) {
-        reject(err)
-      }
-    }
-    reader.onerror = reject
-    reader.readAsArrayBuffer(file)
-  })
-}
-
-function parseXlsxMakt(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null })
-        const [headerRow, ...dataRows] = raw
-        const headers = headerRow.map(h => String(h).toLowerCase())
-
-        const records = dataRows
-          .filter(row => row.some(v => v !== null && v !== ''))
-          .map(row => {
-            const rec = {}
-            headers.forEach((col, i) => {
-              const val = row[i]
-              if (val !== null && val !== undefined && val !== '') {
-                rec[col] = String(val).trim() || null
-              }
-            })
-            return rec
-          })
-          .filter(r => r.matnr && r.spras)
-
-        resolve(records)
-      } catch (err) {
-        reject(err)
-      }
-    }
-    reader.onerror = reject
-    reader.readAsArrayBuffer(file)
-  })
-}
-
-async function uploadBatches(records, endpoint, fetchWithAuth, onProgress) {
-  const total = records.length
-  for (let i = 0; i < total; i += BATCH_SIZE) {
-    const batch = records.slice(i, i + BATCH_SIZE)
-    const resp = await fetchWithAuth(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ records: batch }),
-    })
-    if (!resp.ok) {
-      const data = await resp.json().catch(() => ({}))
-      throw new Error(data.detail || 'Serverfehler')
-    }
-    onProgress(Math.min(i + BATCH_SIZE, total), total)
+async function uploadFile(file, endpoint, fetchWithAuth) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const resp = await fetchWithAuth(endpoint, { method: 'POST', body: formData })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    throw new Error(data.detail || 'Serverfehler')
   }
+  return await resp.json()
 }
 
 function MaterialImportModal({ fetchWithAuth, onClose, onImportDone }) {
@@ -109,7 +19,7 @@ function MaterialImportModal({ fetchWithAuth, onClose, onImportDone }) {
   const [maktFile, setMaktFile] = useState(null)
   const [status, setStatus] = useState('idle')
   const [step, setStep] = useState('')
-  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const [result, setResult] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
   const [migrated, setMigrated] = useState(null)
 
@@ -124,38 +34,27 @@ function MaterialImportModal({ fetchWithAuth, onClose, onImportDone }) {
     if (!maraFile) return
     setStatus('running')
     setErrorMsg('')
-    setProgress({ done: 0, total: 0 })
+    setResult(null)
 
     try {
-      // MARA parsen + hochladen
-      setStep('MARA wird eingelesen…')
-      const maraRecords = await parseXlsxMara(maraFile)
-      setStep(`MARA wird importiert… (${maraRecords.length} Datensätze)`)
-      await uploadBatches(maraRecords, '/api/admin/import-mara-batch', fetchWithAuth, (done, total) => {
-        setProgress({ done, total })
-      })
+      setStep('MARA wird hochgeladen und verarbeitet… (kann einige Minuten dauern)')
+      const maraResult = await uploadFile(maraFile, '/api/admin/upload-mara-xlsx', fetchWithAuth)
 
-      // MAKT parsen + hochladen (optional)
+      let maktResult = null
       if (maktFile) {
-        setStep('MAKT wird eingelesen…')
-        const maktRecords = await parseXlsxMakt(maktFile)
-        setStep(`MAKT wird importiert… (${maktRecords.length} Datensätze)`)
-        setProgress({ done: 0, total: maktRecords.length })
-        await uploadBatches(maktRecords, '/api/admin/import-makt-batch', fetchWithAuth, (done, total) => {
-          setProgress({ done, total })
-        })
+        setStep('MAKT wird hochgeladen und verarbeitet…')
+        maktResult = await uploadFile(maktFile, '/api/admin/upload-makt-xlsx', fetchWithAuth)
       }
 
       setStatus('done')
       setStep('')
+      setResult({ mara: maraResult.imported, makt: maktResult?.imported ?? null })
       if (onImportDone) onImportDone()
     } catch (e) {
       setStatus('error')
       setErrorMsg(String(e.message || e))
     }
   }
-
-  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0
 
   const modal = (
     <div
@@ -204,7 +103,7 @@ function MaterialImportModal({ fetchWithAuth, onClose, onImportDone }) {
           {migrated === true && status === 'idle' && (
             <p style={{ color: 'var(--color-text-light)', marginBottom: '1rem', fontSize: '0.9rem' }}>
               Wähle <strong>MARA_komplett.XLSX</strong> (Pflicht) und optional <strong>MAKT.XLSX</strong>.
-              Bestehende Datensätze werden aktualisiert (Upsert).
+              Die Dateien werden serverseitig verarbeitet — bitte warten.
             </p>
           )}
 
@@ -241,29 +140,19 @@ function MaterialImportModal({ fetchWithAuth, onClose, onImportDone }) {
           </div>
 
           {status === 'running' && (
-            <div>
-              <div className="import-progress" style={{ marginBottom: '0.5rem' }}>
-                <div className="loading-spinner" />
-                <span>{step}</span>
-              </div>
-              {progress.total > 0 && (
-                <div style={{ background: 'var(--color-border)', borderRadius: 4, height: 6 }}>
-                  <div style={{
-                    background: 'var(--color-primary)',
-                    width: `${pct}%`,
-                    height: '100%',
-                    borderRadius: 4,
-                    transition: 'width 0.3s',
-                  }} />
-                </div>
-              )}
+            <div className="import-progress">
+              <div className="loading-spinner" />
+              <span>{step}</span>
             </div>
           )}
 
-          {status === 'done' && (
+          {status === 'done' && result && (
             <div className="import-result import-result--success">
               <strong>Import abgeschlossen</strong>
-              <div style={{ marginTop: '0.25rem' }}>MARA und MAKT erfolgreich importiert.</div>
+              <div style={{ marginTop: '0.25rem' }}>
+                MARA: {result.mara} Datensätze
+                {result.makt !== null && ` · MAKT: ${result.makt} Datensätze`}
+              </div>
             </div>
           )}
 
@@ -280,7 +169,7 @@ function MaterialImportModal({ fetchWithAuth, onClose, onImportDone }) {
             onClick={handleImport}
             disabled={!maraFile || status === 'running' || !migrated}
           >
-            {status === 'running' ? `${pct}%` : 'Importieren'}
+            {status === 'running' ? 'Verarbeite…' : 'Importieren'}
           </button>
           <button className="btn btn-secondary" onClick={onClose}>Schließen</button>
         </div>
