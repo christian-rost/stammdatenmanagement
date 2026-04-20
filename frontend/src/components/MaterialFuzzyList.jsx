@@ -18,7 +18,7 @@ function StatusBadge({ status }) {
 
 function MaterialFuzzyList({
   pairs, selected, onSelect, loading,
-  filter, onFilterChange, threshold, onThresholdChange, stats,
+  filter, onFilterChange, threshold, onThresholdChange, stats, error,
 }) {
   const filtered = pairs.filter(p => filter === 'alle' ? true : p.status === filter)
 
@@ -59,6 +59,12 @@ function MaterialFuzzyList({
       </div>
 
       <div className="tree-view-list">
+        {error && (
+          <div style={{ padding: '1rem', color: 'var(--color-error)', fontSize: '0.85rem' }}>
+            Fehler: {error}
+          </div>
+        )}
+
         {loading && (
           <div className="loading"><div className="loading-spinner" /> Lade Paare...</div>
         )}

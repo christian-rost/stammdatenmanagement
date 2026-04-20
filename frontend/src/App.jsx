@@ -62,6 +62,7 @@ function App() {
   const [matThreshold, setMatThreshold] = useState(0.75)
   const [matFuzzyLoaded, setMatFuzzyLoaded] = useState(false)
 
+  const [matFuzzyError, setMatFuzzyError] = useState('')
   const [matExporting, setMatExporting] = useState(false)
   const [showMatImport, setShowMatImport] = useState(false)
 
@@ -134,6 +135,7 @@ function App() {
 
   async function loadMatFuzzy(t) {
     setLoadingMatFuzzy(true)
+    setMatFuzzyError('')
     try {
       const resp = await fetchWithAuth(`/api/materials/fuzzy?threshold=${t}`)
       if (resp.ok) {
@@ -143,7 +145,12 @@ function App() {
         data.forEach(p => { if (counts[p.status] !== undefined) counts[p.status]++ })
         setMatFuzzyStats({ gesamt: data.length, ...counts })
         setMatFuzzyLoaded(true)
+      } else {
+        const err = await resp.json().catch(() => ({}))
+        setMatFuzzyError(err.detail || `Fehler ${resp.status}`)
       }
+    } catch (e) {
+      setMatFuzzyError(String(e))
     } finally {
       setLoadingMatFuzzy(false)
     }
@@ -383,6 +390,7 @@ function App() {
                 threshold={matThreshold}
                 onThresholdChange={handleMatThresholdChange}
                 stats={matFuzzyStats}
+                error={matFuzzyError}
               />
               <MaterialFuzzyDetail
                 pair={matSelectedPair}

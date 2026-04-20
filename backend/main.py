@@ -1192,7 +1192,7 @@ async def list_material_fuzzy(
                     FROM mara a
                     JOIN mara b
                         ON a.matnr < b.matnr
-                        AND a.maktx %% b.maktx
+                        AND a.maktx % b.maktx
                         AND NOT (
                             COALESCE(a.maktg, '') = COALESCE(b.maktg, '')
                             AND COALESCE(a.maktg, '') <> ''
