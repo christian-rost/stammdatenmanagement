@@ -1170,13 +1170,40 @@ async def list_material_fuzzy(
     threshold: float = 0.75,
     current_user: dict = Depends(get_current_user),
 ):
-    """Ähnliche Materialpaare via Trigram-Ähnlichkeit."""
+    """Ähnliche Materialpaare via Trigram-Ähnlichkeit.
+    Nutzt psycopg2 direkt um den Supabase-RPC-Timeout bei 35k Zeilen zu umgehen."""
     _require_db()
+    if not SUPABASE_DB_URL:
+        raise HTTPException(status_code=503, detail="SUPABASE_DB_URL nicht konfiguriert")
     try:
-        pairs_resp = supabase.rpc(
-            "get_material_fuzzy_duplicates", {"threshold": threshold}
-        ).execute()
-        pairs_raw = pairs_resp.data or []
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT set_limit(%s)", (threshold,))
+                cur.execute("""
+                    SELECT
+                        a.matnr  AS matnr_a,
+                        a.maktx  AS maktx_a,
+                        COALESCE(a.maktg, '') AS maktg_a,
+                        b.matnr  AS matnr_b,
+                        b.maktx  AS maktx_b,
+                        COALESCE(b.maktg, '') AS maktg_b,
+                        similarity(a.maktx, b.maktx)::float AS aehnlichkeit
+                    FROM mara a
+                    JOIN mara b
+                        ON a.matnr < b.matnr
+                        AND a.maktx %% b.maktx
+                        AND NOT (
+                            COALESCE(a.maktg, '') = COALESCE(b.maktg, '')
+                            AND COALESCE(a.maktg, '') <> ''
+                        )
+                    WHERE a.maktx IS NOT NULL AND b.maktx IS NOT NULL
+                    ORDER BY similarity(a.maktx, b.maktx) DESC, a.maktx
+                    LIMIT 300
+                """)
+                pairs_raw = [dict(r) for r in cur.fetchall()]
+        finally:
+            conn.close()
 
         decisions_resp = supabase.table("material_fuzzy_entscheidungen").select("*").execute()
         decisions = {
@@ -1202,6 +1229,9 @@ async def list_material_fuzzy(
                 bearbeitet_von=dec.get("bearbeitet_von"),
             ))
         return result
+    except psycopg2.Error as e:
+        logger.error(f"Material fuzzy DB error: {e}")
+        raise HTTPException(status_code=500, detail=f"Datenbankfehler: {e.pgerror or str(e)}")
     except Exception as e:
         logger.error(f"Error fetching material fuzzy duplicates: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch fuzzy duplicates")
