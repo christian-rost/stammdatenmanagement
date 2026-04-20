@@ -966,6 +966,346 @@ async def update_rule_stats(
         raise HTTPException(status_code=500, detail="Fehler beim Aktualisieren der Statistik")
 
 
+# --- Material-Dubletten ---
+
+class MaterialGroup(BaseModel):
+    maktg: str
+    maktx: Optional[str] = None
+    anzahl: int
+    matnr_liste: list[str]
+    status: str = "offen"
+    matnr_behalten: Optional[str] = None
+    notiz: Optional[str] = None
+    bearbeitet_von: Optional[str] = None
+
+
+class MaterialEntscheidungRequest(BaseModel):
+    maktg: str
+    matnr_behalten: Optional[str] = None
+    matnr_loeschen: list[str] = []
+    notiz: Optional[str] = None
+    status: str = "bearbeitet"
+
+
+class MaterialFuzzyPair(BaseModel):
+    matnr_a: str
+    maktx_a: Optional[str] = None
+    maktg_a: Optional[str] = None
+    matnr_b: str
+    maktx_b: Optional[str] = None
+    maktg_b: Optional[str] = None
+    aehnlichkeit: float
+    status: str = "offen"
+    matnr_behalten: Optional[str] = None
+    notiz: Optional[str] = None
+    bearbeitet_von: Optional[str] = None
+
+
+class MaterialFuzzyEntscheidungRequest(BaseModel):
+    matnr_a: str
+    matnr_b: str
+    matnr_behalten: Optional[str] = None
+    notiz: Optional[str] = None
+    status: str = "bearbeitet"
+
+
+@app.get("/api/materials/duplicates", response_model=list[MaterialGroup])
+async def list_material_duplicates(current_user: dict = Depends(get_current_user)):
+    """Alle Material-Dubletten-Gruppen mit Status."""
+    _require_db()
+    try:
+        groups_resp = supabase.rpc("get_material_duplicate_groups").execute()
+        groups_raw = groups_resp.data or []
+
+        decisions_resp = supabase.table("material_entscheidungen").select("*").execute()
+        decisions = {d["maktg"]: d for d in (decisions_resp.data or [])}
+
+        result = []
+        for g in groups_raw:
+            maktg = g["maktg"] or ""
+            dec = decisions.get(maktg, {})
+            result.append(MaterialGroup(
+                maktg=maktg,
+                maktx=g.get("maktx"),
+                anzahl=g["anzahl"],
+                matnr_liste=g["matnr_liste"] or [],
+                status=dec.get("status", "offen"),
+                matnr_behalten=dec.get("matnr_behalten"),
+                notiz=dec.get("notiz"),
+                bearbeitet_von=dec.get("bearbeitet_von"),
+            ))
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching material duplicates: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch material duplicates")
+
+
+@app.get("/api/materials/duplicates/records")
+async def get_material_duplicate_records(
+    maktg: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Alle MARA-Datensätze für eine Material-Dubletten-Gruppe."""
+    _require_db()
+    try:
+        resp = supabase.table("mara").select("*").eq("maktg", maktg).order("matnr").execute()
+        return resp.data or []
+    except Exception as e:
+        logger.error(f"Error fetching material records for maktg={maktg}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch material records")
+
+
+@app.get("/api/materials/record")
+async def get_material_record(
+    matnr: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Einzelnen MARA-Datensatz per MATNR abrufen."""
+    _require_db()
+    try:
+        resp = supabase.table("mara").select("*").eq("matnr", matnr).limit(1).execute()
+        data = resp.data or []
+        if not data:
+            raise HTTPException(status_code=404, detail="Material nicht gefunden")
+        return data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching material record {matnr}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch material record")
+
+
+@app.post("/api/materials/decisions")
+async def save_material_decision(
+    body: MaterialEntscheidungRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Entscheidung für eine Material-Dubletten-Gruppe speichern (upsert)."""
+    _require_db()
+    try:
+        supabase.table("material_entscheidungen").upsert(
+            {
+                "maktg": body.maktg,
+                "matnr_behalten": body.matnr_behalten,
+                "matnr_loeschen": body.matnr_loeschen,
+                "notiz": body.notiz,
+                "bearbeitet_von": current_user["username"],
+                "status": body.status,
+            },
+            on_conflict="maktg",
+        ).execute()
+        return {"message": "Entscheidung gespeichert"}
+    except Exception as e:
+        logger.error(f"Error saving material decision: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save decision")
+
+
+@app.get("/api/materials/stats", response_model=StatsResponse)
+async def get_material_stats(current_user: dict = Depends(get_current_user)):
+    """Statistik: Gesamt / Offen / Bearbeitet / Ignoriert (Materialien)."""
+    _require_db()
+    try:
+        groups_resp = supabase.rpc("get_material_duplicate_groups").execute()
+        total = len(groups_resp.data or [])
+
+        decisions_resp = supabase.table("material_entscheidungen").select("status").execute()
+        counts = {"bearbeitet": 0, "ignoriert": 0}
+        for d in (decisions_resp.data or []):
+            s = d.get("status", "offen")
+            if s in counts:
+                counts[s] += 1
+
+        offen = total - counts["bearbeitet"] - counts["ignoriert"]
+        return StatsResponse(
+            gesamt=total,
+            offen=max(offen, 0),
+            bearbeitet=counts["bearbeitet"],
+            ignoriert=counts["ignoriert"],
+        )
+    except Exception as e:
+        logger.error(f"Error fetching material stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch material stats")
+
+
+@app.get("/api/materials/export")
+async def export_material_decisions(current_user: dict = Depends(get_current_user)):
+    """CSV-Export aller Material-Entscheidungen."""
+    _require_db()
+    try:
+        resp = supabase.table("material_entscheidungen").select("*").order("maktg").execute()
+        rows = resp.data or []
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "maktg", "status", "matnr_behalten",
+            "matnr_loeschen", "notiz", "bearbeitet_von", "bearbeitet_am"
+        ])
+        for row in rows:
+            loeschen = " | ".join(row.get("matnr_loeschen") or [])
+            writer.writerow([
+                row.get("maktg", ""),
+                row.get("status", ""),
+                row.get("matnr_behalten", ""),
+                loeschen,
+                row.get("notiz", ""),
+                row.get("bearbeitet_von", ""),
+                row.get("bearbeitet_am", ""),
+            ])
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=material_entscheidungen.csv"},
+        )
+    except Exception as e:
+        logger.error(f"Error exporting material decisions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export")
+
+
+@app.get("/api/materials/fuzzy", response_model=list[MaterialFuzzyPair])
+async def list_material_fuzzy(
+    threshold: float = 0.75,
+    current_user: dict = Depends(get_current_user),
+):
+    """Ähnliche Materialpaare via Trigram-Ähnlichkeit."""
+    _require_db()
+    try:
+        pairs_resp = supabase.rpc(
+            "get_material_fuzzy_duplicates", {"threshold": threshold}
+        ).execute()
+        pairs_raw = pairs_resp.data or []
+
+        decisions_resp = supabase.table("material_fuzzy_entscheidungen").select("*").execute()
+        decisions = {
+            (d["matnr_a"], d["matnr_b"]): d
+            for d in (decisions_resp.data or [])
+        }
+
+        result = []
+        for p in pairs_raw:
+            ma, mb = p["matnr_a"], p["matnr_b"]
+            dec = decisions.get((ma, mb), {})
+            result.append(MaterialFuzzyPair(
+                matnr_a=ma,
+                maktx_a=p.get("maktx_a"),
+                maktg_a=p.get("maktg_a", ""),
+                matnr_b=mb,
+                maktx_b=p.get("maktx_b"),
+                maktg_b=p.get("maktg_b", ""),
+                aehnlichkeit=round(p.get("aehnlichkeit", 0), 2),
+                status=dec.get("status", "offen"),
+                matnr_behalten=dec.get("matnr_behalten"),
+                notiz=dec.get("notiz"),
+                bearbeitet_von=dec.get("bearbeitet_von"),
+            ))
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching material fuzzy duplicates: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch fuzzy duplicates")
+
+
+@app.post("/api/materials/fuzzy/decision")
+async def save_material_fuzzy_decision(
+    body: MaterialFuzzyEntscheidungRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Entscheidung für ein Material-Fuzzy-Paar speichern (upsert)."""
+    _require_db()
+    try:
+        supabase.table("material_fuzzy_entscheidungen").upsert(
+            {
+                "matnr_a": body.matnr_a,
+                "matnr_b": body.matnr_b,
+                "matnr_behalten": body.matnr_behalten,
+                "notiz": body.notiz,
+                "bearbeitet_von": current_user["username"],
+                "status": body.status,
+            },
+            on_conflict="matnr_a,matnr_b",
+        ).execute()
+        return {"message": "Entscheidung gespeichert"}
+    except Exception as e:
+        logger.error(f"Error saving material fuzzy decision: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save decision")
+
+
+_MATERIAL_SEARCH_FIELDS = ["matnr", "maktx", "maktg", "mtart", "matkl", "meins", "mstae"]
+
+
+@app.get("/api/materials/search")
+async def search_materials(
+    q: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Freitextsuche über relevante MARA-Felder."""
+    _require_db()
+    q = q.strip()
+    if len(q) < 1:
+        return []
+    try:
+        or_filter = ",".join(f"{f}.ilike.%{q}%" for f in _MATERIAL_SEARCH_FIELDS)
+        resp = supabase.table("mara").select("*").or_(or_filter).limit(500).execute()
+        return resp.data or []
+    except Exception as e:
+        logger.error(f"Material search error: {e}")
+        raise HTTPException(status_code=500, detail="Materialsuche fehlgeschlagen")
+
+
+@app.get("/api/admin/check-material-schema")
+async def check_material_schema(current_user: dict = Depends(get_current_user)):
+    """Prüft ob die Material-Tabellen (mara, makt) angelegt wurden."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins")
+    try:
+        supabase.table("mara").select("matnr").limit(1).execute()
+        return {"migrated": True}
+    except Exception:
+        return {"migrated": False}
+
+
+@app.post("/api/admin/import-mara-batch")
+async def import_mara_batch(
+    body: ImportBatchRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Batch-Import von MARA-Datensätzen (nur Admins)."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins können Daten importieren")
+    if not body.records:
+        return {"imported": 0}
+    try:
+        supabase.table("mara").upsert(body.records, on_conflict="matnr").execute()
+        logger.info(f"MARA-Import: {len(body.records)} Datensätze von {current_user['username']}")
+        return {"imported": len(body.records)}
+    except Exception as e:
+        logger.error(f"MARA-Import-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/import-makt-batch")
+async def import_makt_batch(
+    body: ImportBatchRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Batch-Import von MAKT-Datensätzen (nur Admins)."""
+    _require_db()
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins können Daten importieren")
+    if not body.records:
+        return {"imported": 0}
+    try:
+        supabase.table("makt").upsert(body.records, on_conflict="matnr,spras").execute()
+        logger.info(f"MAKT-Import: {len(body.records)} Datensätze von {current_user['username']}")
+        return {"imported": len(body.records)}
+    except Exception as e:
+        logger.error(f"MAKT-Import-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/")
 async def root():
     return {"status": "healthy", "service": "Stammdatenmanagement API"}
