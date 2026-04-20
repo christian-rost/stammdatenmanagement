@@ -9,8 +9,7 @@ function sanitizeColName(h) {
 }
 
 function coerceMara(col, val) {
-  if (val === null || val === undefined || val === '') return null
-  if (val instanceof Date) return val.toISOString().slice(0, 10)
+  if (val === null || val === undefined) return null
   const s = String(val).trim()
   return s === '' ? null : s
 }
@@ -20,10 +19,13 @@ function parseXlsxMara(file) {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true })
+        const wb = XLSX.read(e.target.result, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
-        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null })
+        if (!ws) { reject(new Error('Kein Tabellenblatt gefunden')); return }
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false })
+        if (!raw || raw.length < 2) { reject(new Error('Excel-Datei enthält keine Daten')); return }
         const [headerRow, ...dataRows] = raw
+        if (!headerRow) { reject(new Error('Keine Spaltenüberschriften gefunden')); return }
         const headers = headerRow.map(h => sanitizeColName(h))
 
         const records = dataRows
