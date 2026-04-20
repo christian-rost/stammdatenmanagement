@@ -19,9 +19,10 @@ function parseXlsxMara(file) {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(e.target.result, { type: 'array' })
-        const ws = wb.Sheets[wb.SheetNames[0]]
-        if (!ws) { reject(new Error('Kein Tabellenblatt gefunden')); return }
+        const wb = XLSX.read(e.target.result, { type: 'array', sheets: 0 })
+        const sheetName = wb.SheetNames?.[0]
+        const ws = sheetName ? wb.Sheets[sheetName] : undefined
+        if (!ws) { reject(new Error(`Kein Tabellenblatt gefunden (SheetNames: ${JSON.stringify(wb?.SheetNames)})`)); return }
         const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false })
         if (!raw || raw.length < 2) { reject(new Error('Excel-Datei enthält keine Daten')); return }
         const [headerRow, ...dataRows] = raw
