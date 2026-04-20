@@ -98,6 +98,7 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
                   <th>Behalten</th>
                   <th>MATNR</th>
                   <th>MAKTX</th>
+                  <th>MAKTG</th>
                   <th>MTART</th>
                   <th>MATKL</th>
                   <th>MEINS</th>
@@ -125,6 +126,7 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
                       </td>
                       <td className="lifnr-cell">{r.matnr}</td>
                       <td>{r.maktx || '—'}</td>
+                      <td style={{ color: 'var(--color-text-light)' }}>{r.maktg || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>{r.mtart || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>{r.matkl || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>{r.meins || '—'}</td>
