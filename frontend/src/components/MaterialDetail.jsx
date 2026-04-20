@@ -1,16 +1,80 @@
 import { useState, useEffect } from 'react'
 
+function DecisionBanner({ decision, allMatnrs }) {
+  if (!decision || decision.status === 'offen') return null
+
+  let typ, typColor
+  if (decision.status === 'ignoriert') {
+    typ = 'Ignoriert'
+    typColor = 'var(--color-text-light)'
+  } else if (decision.matnr_behalten) {
+    typ = null
+  } else if (!decision.matnr_loeschen || decision.matnr_loeschen.length === 0) {
+    typ = 'Alle behalten'
+    typColor = 'var(--color-success)'
+  } else {
+    typ = 'Alle löschen'
+    typColor = 'var(--color-error)'
+  }
+
+  const datum = decision.bearbeitet_am
+    ? new Date(decision.bearbeitet_am).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
+    : null
+
+  return (
+    <div style={{
+      background: 'var(--color-surface)',
+      border: '1px solid var(--color-border)',
+      borderRadius: '6px',
+      padding: '0.75rem 1rem',
+      marginBottom: '0.75rem',
+      fontSize: '0.85rem',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+        <div>
+          <span style={{ color: 'var(--color-text-light)', marginRight: '0.5rem' }}>Gespeicherte Entscheidung:</span>
+          {typ ? (
+            <strong style={{ color: typColor }}>{typ}</strong>
+          ) : (
+            <>
+              <span style={{ color: 'var(--color-text-light)' }}>Behalten: </span>
+              <strong style={{ color: 'var(--color-success)' }}>{decision.matnr_behalten}</strong>
+              {decision.matnr_loeschen?.length > 0 && (
+                <>
+                  <span style={{ color: 'var(--color-text-light)', margin: '0 0.4rem' }}>· Löschen: </span>
+                  <strong style={{ color: 'var(--color-error)' }}>{decision.matnr_loeschen.join(', ')}</strong>
+                </>
+              )}
+            </>
+          )}
+          {decision.notiz && (
+            <div style={{ marginTop: '0.3rem', color: 'var(--color-text-light)', fontStyle: 'italic' }}>
+              „{decision.notiz}"
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--color-text-light)', flexShrink: 0 }}>
+          {decision.bearbeitet_von && <div>{decision.bearbeitet_von}</div>}
+          {datum && <div>{datum}</div>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
   const [records, setRecords] = useState([])
   const [loading, setLoading] = useState(false)
+  const [decision, setDecision] = useState(null)
   const [matnrBehalten, setMatnrBehalten] = useState(null)
   const [notiz, setNotiz] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (!group) { setRecords([]); return }
+    if (!group) { setRecords([]); setDecision(null); return }
     loadRecords()
+    loadDecision()
     setMatnrBehalten(group.matnr_behalten || null)
     setNotiz(group.notiz || '')
     setSaved(false)
@@ -25,6 +89,12 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function loadDecision() {
+    const resp = await fetchWithAuth(`/api/materials/decisions/${encodeURIComponent(group.maktg)}`)
+    if (resp.ok) setDecision(await resp.json())
+    else setDecision(null)
   }
 
   async function handleSave(statusValue, behalten = matnrBehalten, loeschenList = null) {
@@ -46,6 +116,7 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
       if (resp.ok) {
         setSaved(true)
         onDecisionSaved(group.maktg, statusValue)
+        loadDecision()
         setTimeout(() => setSaved(false), 3000)
       }
     } finally {
@@ -89,6 +160,8 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
       </div>
 
       <div className="detail-content">
+        <DecisionBanner decision={decision} />
+
         {loading ? (
           <div className="loading"><div className="loading-spinner" /> Lade Datensätze...</div>
         ) : (

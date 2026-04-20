@@ -1101,6 +1101,32 @@ async def save_material_decision(
         raise HTTPException(status_code=500, detail="Failed to save decision")
 
 
+@app.get("/api/materials/decisions/{maktg}")
+async def get_material_decision(
+    maktg: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Gespeicherte Entscheidung für eine MAKTG-Gruppe abrufen."""
+    _require_db()
+    try:
+        resp = (
+            supabase.table("material_entscheidungen")
+            .select("maktg,matnr_behalten,matnr_loeschen,notiz,status,bearbeitet_von,bearbeitet_am")
+            .eq("maktg", maktg)
+            .limit(1)
+            .execute()
+        )
+        data = resp.data or []
+        if not data:
+            raise HTTPException(status_code=404, detail="Keine Entscheidung gefunden")
+        return data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching material decision for maktg={maktg}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch decision")
+
+
 @app.get("/api/materials/stats", response_model=StatsResponse)
 async def get_material_stats(current_user: dict = Depends(get_current_user)):
     """Statistik: Gesamt / Offen / Bearbeitet / Ignoriert (Materialien)."""
