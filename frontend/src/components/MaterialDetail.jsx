@@ -27,16 +27,17 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
     }
   }
 
-  async function handleSave(statusValue) {
+  async function handleSave(statusValue, behalten = matnrBehalten, loeschenList = null) {
     setSaving(true); setSaved(false)
-    const loeschen = records.map(r => r.matnr).filter(m => m !== matnrBehalten)
+    const defaultLoeschen = records.map(r => r.matnr).filter(m => m !== behalten)
+    const loeschen = loeschenList !== null ? loeschenList : defaultLoeschen
     try {
       const resp = await fetchWithAuth('/api/materials/decisions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           maktg: group.maktg,
-          matnr_behalten: statusValue === 'ignoriert' ? null : matnrBehalten,
+          matnr_behalten: statusValue === 'ignoriert' ? null : behalten,
           matnr_loeschen: statusValue === 'ignoriert' ? [] : loeschen,
           notiz,
           status: statusValue,
@@ -172,6 +173,22 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
             >
               {saving ? 'Speichern...' : 'Entscheidung speichern'}
             </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleSave('bearbeitet', null, [])}
+              disabled={saving}
+              title="Alle Materialien dieser Gruppe behalten, keines löschen"
+            >
+              Alle behalten
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleSave('bearbeitet', null, records.map(r => r.matnr))}
+              disabled={saving}
+              title="Alle Materialien dieser Gruppe löschen"
+            >
+              Alle löschen
+            </button>
             <button className="btn btn-secondary" onClick={() => handleSave('ignoriert')} disabled={saving}>
               Ignorieren
             </button>
@@ -179,7 +196,7 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
           </div>
           {!matnrBehalten && (
             <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: 'var(--color-text-light)' }}>
-              Bitte zuerst ein Material zum Behalten auswählen.
+              Bitte ein Material zum Behalten auswählen — oder „Alle behalten" / „Alle löschen" verwenden.
             </div>
           )}
         </div>
