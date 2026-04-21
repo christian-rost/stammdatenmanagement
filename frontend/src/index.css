@@ -422,7 +422,8 @@ body {
   background: var(--color-primary);
   color: var(--color-white);
 }
-.mode-tab:hover:not(.active) { color: var(--color-white); }
+.mode-tab:hover:not(.active):not(:disabled) { color: var(--color-white); }
+.mode-tab:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* Threshold slider */
 .threshold-bar {

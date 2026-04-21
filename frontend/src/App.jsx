@@ -317,7 +317,7 @@ function App() {
             ) : (
               <>
                 <button className={`mode-tab ${matMode === 'exact' ? 'active' : ''}`} onClick={() => setMatMode('exact')}>Exakt</button>
-                <button className={`mode-tab ${matMode === 'fuzzy' ? 'active' : ''}`} onClick={() => setMatMode('fuzzy')}>Ähnlich</button>
+                <button className="mode-tab" disabled title="Ähnlichkeitssuche derzeit nicht verfügbar">Ähnlich</button>
                 <button className={`mode-tab ${matMode === 'search' ? 'active' : ''}`} onClick={() => setMatMode('search')}>Suche</button>
               </>
             )}
