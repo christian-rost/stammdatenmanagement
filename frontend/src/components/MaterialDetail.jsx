@@ -177,6 +177,7 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
                   <th>MATKL</th>
                   <th>MEINS</th>
                   <th>MSTAE</th>
+                  <th>MFRPN</th>
                   <th>Angelegt</th>
                   <th>Löschvm.</th>
                 </tr>
@@ -205,6 +206,7 @@ function MaterialDetail({ group, fetchWithAuth, onDecisionSaved }) {
                       <td style={{ color: 'var(--color-text-light)' }}>{r.matkl || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>{r.meins || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>{r.mstae || '—'}</td>
+                      <td style={{ color: 'var(--color-text-light)' }}>{r.mfrpn || '—'}</td>
                       <td style={{ color: 'var(--color-text-light)' }}>
                         {r.ersda ? r.ersda.slice(0, 10) : ''}
                       </td>
