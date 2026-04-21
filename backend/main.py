@@ -967,6 +967,261 @@ async def update_rule_stats(
         raise HTTPException(status_code=500, detail="Fehler beim Aktualisieren der Statistik")
 
 
+# --- Material-Regel-Assistent ---
+
+_MARA_SCHEMA_CONTEXT = """
+Die Tabelle `mara` enthält SAP-Material-Stammdaten. Wichtige Spalten:
+- matnr TEXT: Materialnummer (eindeutige ID, Primary Key)
+- maktx TEXT: Kurzbezeichnung des Materials (Originalschreibung)
+- maktg TEXT: Normierte Kurzbezeichnung (Großbuchstaben, Dubletten-Key)
+- mtart TEXT: Materialart (z. B. 'FERT', 'ROH', 'HALB', 'HIBE', 'NLAG')
+- matkl TEXT: Materialgruppe
+- meins TEXT: Basismengeneinheit (z. B. 'ST', 'KG', 'M', 'L')
+- mstae TEXT: Branchenspezifischer Materialstatus
+- mfrpn TEXT: Hersteller-Teilenummer
+- ersda DATE: Anlagedatum
+- lvorm TEXT: Löschvormerkung ('X' = zum Löschen vorgemerkt, NULL = aktiv)
+
+Eine "Dubletten-Gruppe" besteht aus allen Datensätzen mit identischem COALESCE(maktg,'')
+bei denen COUNT(*) > 1 ist und maktg IS NOT NULL.
+"""
+
+_MATERIAL_SYSTEM_PROMPT = """Du bist ein SQL-Experte für SAP-Stammdaten und Dubletten-Bereinigung.
+Analysiere die vom Anwender beschriebene Regel und erzeuge ein PostgreSQL-SELECT-Statement.
+
+""" + _MARA_SCHEMA_CONTEXT + """
+WICHTIG — Einschränkungen:
+- Es existiert NUR die Tabelle `mara`. Keine anderen Tabellen.
+- Falls eine Regel Daten erfordert, die nicht in mara vorhanden sind,
+  erkläre das in "erklaerung" und erstelle das SQL auf Basis der verfügbaren Felder.
+
+Das SQL muss folgende Anforderungen erfüllen:
+1. Reines SELECT-Statement (kein INSERT/UPDATE/DELETE/DDL)
+2. Verwendet NUR die Tabelle `mara` — keine JOINs auf andere Tabellen
+3. Gibt mindestens die Spalten zurück: matnr, maktx, maktg
+4. Enthält NUR Datensätze, die zu Dubletten-Gruppen gehören (Unterabfrage mit HAVING COUNT(*) > 1)
+5. Setzt die beschriebene Regel als WHERE-Bedingung um
+6. Sortiert nach maktg, matnr
+7. Hat LIMIT 1000
+
+Antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Markdown, kein anderer Text):
+{
+  "sql": "SELECT ... FROM mara ...",
+  "erklaerung": "Kurze deutsche Erklärung was das SQL macht",
+  "aktion": "ignorieren",
+  "aktion_erklaerung": "Kurze deutsche Erklärung der vorgeschlagenen Aktion"
+}
+
+Für "aktion" wähle:
+- "ignorieren": Alle Materialien der Gruppe bleiben bestehen (keine Löschung nötig)
+- "pruefen": Manuelle Einzelprüfung empfohlen
+"""
+
+
+class MaterialRuleApplyRequest(BaseModel):
+    groups: list[dict]  # [{maktg: str}, ...]
+    status: str = "ignoriert"
+    notiz: Optional[str] = None
+
+
+@app.post("/api/material-rules/generate-sql", response_model=RuleGenerateResponse)
+async def generate_material_rule_sql(
+    body: RuleGenerateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Erzeugt ein SQL-Statement für Materialien aus einer Klartextregel via Claude API."""
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY nicht konfiguriert")
+
+    regel = body.regel.strip()
+    if len(regel) < 5:
+        raise HTTPException(status_code=400, detail="Regel zu kurz")
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        response = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=2048,
+            system=_MATERIAL_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": f"Erstelle ein SQL-Statement für folgende Regel:\n\n{regel}"}],
+        )
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        data = json.loads(raw)
+        sql = data.get("sql", "").strip()
+        if not sql:
+            raise HTTPException(status_code=500, detail="LLM hat kein SQL zurückgegeben")
+        _validate_sql(sql)
+        return RuleGenerateResponse(
+            sql=sql,
+            erklaerung=data.get("erklaerung", ""),
+            aktion=data.get("aktion", "ignorieren"),
+            aktion_erklaerung=data.get("aktion_erklaerung", ""),
+        )
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        logger.error(f"Material rule LLM JSON parse error: {e}")
+        raise HTTPException(status_code=500, detail="LLM-Antwort konnte nicht verarbeitet werden")
+    except Exception as e:
+        logger.error(f"Material rule generate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/material-rules/execute")
+async def execute_material_rule_sql(
+    body: RuleExecuteRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Führt ein validiertes SELECT-Statement gegen mara aus."""
+    if not SUPABASE_DB_URL:
+        raise HTTPException(status_code=503, detail="SUPABASE_DB_URL nicht konfiguriert")
+
+    _validate_sql(body.sql)
+
+    try:
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(body.sql)
+                rows = cur.fetchall()
+                result_rows = [dict(r) for r in rows]
+
+                seen_groups: set = set()
+                for r in result_rows:
+                    if r.get("maktg"):
+                        seen_groups.add(r["maktg"])
+                groups_total = len(seen_groups)
+
+                groups_offen = groups_total
+                if seen_groups and supabase:
+                    try:
+                        decisions_resp = supabase.table("material_entscheidungen") \
+                            .select("maktg,status").execute()
+                        done_keys = {
+                            d["maktg"] for d in (decisions_resp.data or [])
+                            if d.get("status") in ("bearbeitet", "ignoriert")
+                        }
+                        groups_offen = sum(1 for g in seen_groups if g not in done_keys)
+                    except Exception:
+                        pass
+
+                return {
+                    "rows": result_rows,
+                    "count": len(result_rows),
+                    "groups_total": groups_total,
+                    "groups_offen": groups_offen,
+                }
+        finally:
+            conn.close()
+    except psycopg2.Error as e:
+        logger.error(f"Material rule SQL execution error: {e}")
+        raise HTTPException(status_code=400, detail=f"SQL-Fehler: {e.pgerror or str(e)}")
+    except Exception as e:
+        logger.error(f"Material rule execute error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/material-rules/apply")
+async def apply_material_rule(
+    body: MaterialRuleApplyRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Wendet eine Entscheidung auf mehrere Material-Dubletten-Gruppen an (Batch-Upsert)."""
+    _require_db()
+    if not body.groups:
+        return {"applied": 0}
+
+    records = [
+        {
+            "maktg": g["maktg"],
+            "status": body.status,
+            "notiz": body.notiz,
+            "bearbeitet_von": current_user["username"],
+            "matnr_behalten": None,
+            "matnr_loeschen": [],
+        }
+        for g in body.groups
+        if g.get("maktg")
+    ]
+
+    try:
+        supabase.table("material_entscheidungen").upsert(
+            records, on_conflict="maktg"
+        ).execute()
+        return {"applied": len(records)}
+    except Exception as e:
+        logger.error(f"Material rule apply error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/material-rules/saved")
+async def list_saved_material_rules(current_user: dict = Depends(get_current_user)):
+    _require_db()
+    try:
+        resp = supabase.table("material_regel_vorlagen").select("*").order("erstellt_am", desc=True).execute()
+        return resp.data or []
+    except Exception as e:
+        logger.error(f"Error listing saved material rules: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Laden der Regeln")
+
+
+@app.post("/api/material-rules/saved", status_code=201)
+async def create_saved_material_rule(
+    body: RegelVorlageCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_db()
+    try:
+        data = {
+            "name": body.name,
+            "regel": body.regel,
+            "sql_text": body.sql_text,
+            "erklaerung": body.erklaerung,
+            "aktion": body.aktion,
+            "aktion_erklaerung": body.aktion_erklaerung,
+            "erstellt_von": current_user["username"],
+        }
+        resp = supabase.table("material_regel_vorlagen").insert(data).execute()
+        return resp.data[0] if resp.data else {}
+    except Exception as e:
+        logger.error(f"Error saving material rule: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Speichern der Regel")
+
+
+@app.delete("/api/material-rules/saved/{rule_id}", status_code=204)
+async def delete_saved_material_rule(
+    rule_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_db()
+    try:
+        supabase.table("material_regel_vorlagen").delete().eq("id", rule_id).execute()
+    except Exception as e:
+        logger.error(f"Error deleting material rule {rule_id}: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Löschen der Regel")
+
+
+@app.patch("/api/material-rules/saved/{rule_id}/stats")
+async def update_material_rule_stats(
+    rule_id: int,
+    body: RegelVorlageStatsUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_db()
+    try:
+        supabase.table("material_regel_vorlagen").update({
+            "letzte_ausfuehrung": body.letzte_ausfuehrung,
+            "letztes_ergebnis_anzahl": body.letztes_ergebnis_anzahl,
+            "letztes_ergebnis_offen": body.letztes_ergebnis_offen,
+        }).eq("id", rule_id).execute()
+        return {"updated": True}
+    except Exception as e:
+        logger.error(f"Error updating material rule stats {rule_id}: {e}")
+        raise HTTPException(status_code=500, detail="Fehler beim Aktualisieren der Statistik")
+
+
 # --- Material-Dubletten ---
 
 class MaterialGroup(BaseModel):

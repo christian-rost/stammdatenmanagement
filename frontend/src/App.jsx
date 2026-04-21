@@ -14,6 +14,7 @@ import MaterialFuzzyList from './components/MaterialFuzzyList.jsx'
 import MaterialFuzzyDetail from './components/MaterialFuzzyDetail.jsx'
 import MaterialSearchView from './components/MaterialSearchView.jsx'
 import MaterialImportModal from './components/MaterialImportModal.jsx'
+import MaterialRegelView from './components/MaterialRegelView.jsx'
 
 function App() {
   const { user, loading, logout, fetchWithAuth, isAuthenticated } = useAuth()
@@ -319,6 +320,7 @@ function App() {
                 <button className={`mode-tab ${matMode === 'exact' ? 'active' : ''}`} onClick={() => setMatMode('exact')}>Exakt</button>
                 <button className="mode-tab" disabled title="Ähnlichkeitssuche derzeit nicht verfügbar">Ähnlich</button>
                 <button className={`mode-tab ${matMode === 'search' ? 'active' : ''}`} onClick={() => setMatMode('search')}>Suche</button>
+                <button className={`mode-tab ${matMode === 'regeln' ? 'active' : ''}`} onClick={() => setMatMode('regeln')}>Regeln</button>
               </>
             )}
           </div>
@@ -347,12 +349,21 @@ function App() {
 
       <main className="main-content" style={
         (!isMatDomain && (mode === 'search' || mode === 'regeln')) ||
-        (isMatDomain && matMode === 'search')
+        (isMatDomain && (matMode === 'search' || matMode === 'regeln'))
           ? { padding: 0 }
           : undefined
       }>
         {isMatDomain ? (
-          matMode === 'search' ? (
+          matMode === 'regeln' ? (
+            <MaterialRegelView
+              fetchWithAuth={fetchWithAuth}
+              onGoToDuplicate={group => {
+                const found = matGroups.find(g => g.maktg === group.maktg)
+                setMatSelectedGroup(found || { ...group, anzahl: 0, matnr_liste: [], status: 'offen' })
+                setMatMode('exact')
+              }}
+            />
+          ) : matMode === 'search' ? (
             <MaterialSearchView
               fetchWithAuth={fetchWithAuth}
               onGoToDuplicate={group => {
