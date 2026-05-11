@@ -287,28 +287,52 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <header className="header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-          <h1>Stammdaten — Dubletten-Bereinigung</h1>
+      <header className="header" style={{ flexDirection: 'column', alignItems: 'stretch', padding: '0.75rem 2rem 0', gap: 0 }}>
+        {/* Zeile 1: Titel + Bereich-Umschalter + Benutzer */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', paddingBottom: '0.6rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+            <h1>Stammdaten — Dubletten-Bereinigung</h1>
 
-          {/* Bereich-Umschalter */}
-          <div className="mode-tabs" style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 6 }}>
-            <button
-              className={`mode-tab ${!isMatDomain ? 'active' : ''}`}
-              onClick={() => setDomain('lieferanten')}
-            >
-              Lieferanten
-            </button>
-            <button
-              className={`mode-tab ${isMatDomain ? 'active' : ''}`}
-              onClick={() => setDomain('materialien')}
-            >
-              Materialien
-            </button>
+            <div className="mode-tabs" style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 6 }}>
+              <button
+                className={`mode-tab ${!isMatDomain ? 'active' : ''}`}
+                onClick={() => setDomain('lieferanten')}
+              >
+                Lieferanten
+              </button>
+              <button
+                className={`mode-tab ${isMatDomain ? 'active' : ''}`}
+                onClick={() => setDomain('materialien')}
+              >
+                Materialien
+              </button>
+            </div>
           </div>
 
-          {/* Sub-Tabs */}
-          <div className="mode-tabs">
+          <div className="header-user">
+            <span>{user?.username}</span>
+            {user?.is_admin && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => isMatDomain ? setShowMatImport(true) : setShowImport(true)}
+              >
+                Daten importieren
+              </button>
+            )}
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={isMatDomain ? handleMatExport : handleExport}
+              disabled={isMatDomain ? matExporting : exporting}
+            >
+              {(isMatDomain ? matExporting : exporting) ? 'Exportiere...' : 'CSV Export'}
+            </button>
+            <button className="btn btn-outline" onClick={logout}>Logout</button>
+          </div>
+        </div>
+
+        {/* Zeile 2: Sub-Tabs */}
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.4rem 0' }}>
+          <div className="mode-tabs" style={{ background: 'rgba(255,255,255,0.06)' }}>
             {!isMatDomain ? (
               <>
                 <button className={`mode-tab ${mode === 'exact' ? 'active' : ''}`} onClick={() => setMode('exact')}>Exakt</button>
@@ -326,26 +350,6 @@ function App() {
               </>
             )}
           </div>
-        </div>
-
-        <div className="header-user">
-          <span>{user?.username}</span>
-          {user?.is_admin && (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => isMatDomain ? setShowMatImport(true) : setShowImport(true)}
-            >
-              Daten importieren
-            </button>
-          )}
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={isMatDomain ? handleMatExport : handleExport}
-            disabled={isMatDomain ? matExporting : exporting}
-          >
-            {(isMatDomain ? matExporting : exporting) ? 'Exportiere...' : 'CSV Export'}
-          </button>
-          <button className="btn btn-outline" onClick={logout}>Logout</button>
         </div>
       </header>
 
