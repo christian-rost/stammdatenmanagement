@@ -1728,10 +1728,13 @@ async def upload_ekpo_xlsx(
             if v is None:
                 return None
             if isinstance(v, (int, float)):
-                return str(int(v)).zfill(18)
-            return str(v).strip().zfill(18)
+                i = int(v)
+                return None if i == 0 else str(i).zfill(18)
+            s = str(v).strip()
+            return None if not s or s.lstrip("0") == "" else s.zfill(18)
 
-        records = []
+        # dict matnr → (aedat, ematn) für Deduplizierung innerhalb des Batches
+        records_dict: dict[str, tuple] = {}
         for row in rows_iter:
             matnr = _norm_matnr(row[matnr_idx])
             if not matnr:
@@ -1748,7 +1751,9 @@ async def upload_ekpo_xlsx(
 
             ematn = _norm_matnr(row[ematn_idx]) if ematn_idx is not None else None
 
-            records.append((matnr, aedat, ematn))
+            records_dict[matnr] = (matnr, aedat, ematn)
+
+        records = list(records_dict.values())
 
         wb.close()
 
