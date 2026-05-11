@@ -1740,11 +1740,11 @@ async def upload_ekpo_xlsx(
             aedat = None
             if aedat_idx is not None and row[aedat_idx] is not None:
                 v = row[aedat_idx]
-                from datetime import date as _date
                 if isinstance(v, _date):
                     aedat = v.isoformat()
                 else:
-                    aedat = str(v)[:10]
+                    s = str(v).strip()
+                    aedat = s[:10] if s else None
 
             ematn = _norm_matnr(row[ematn_idx]) if ematn_idx is not None else None
 
