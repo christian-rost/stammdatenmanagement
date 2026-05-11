@@ -287,12 +287,11 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <header className="header" style={{ flexDirection: 'column', alignItems: 'stretch', padding: '0.75rem 2rem 0', gap: 0 }}>
-        {/* Zeile 1: Titel + Bereich-Umschalter + Benutzer */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', paddingBottom: '0.6rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-            <h1>Stammdaten — Dubletten-Bereinigung</h1>
-
+      <header className="header" style={{ alignItems: 'flex-start', padding: '0.75rem 2rem' }}>
+        {/* Links: Titel + alle Tabs übereinander */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <h1>Stammdaten — Dubletten-Bereinigung</h1>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
             <div className="mode-tabs" style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 6 }}>
               <button
                 className={`mode-tab ${!isMatDomain ? 'active' : ''}`}
@@ -307,49 +306,46 @@ function App() {
                 Materialien
               </button>
             </div>
-          </div>
-
-          <div className="header-user">
-            <span>{user?.username}</span>
-            {user?.is_admin && (
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => isMatDomain ? setShowMatImport(true) : setShowImport(true)}
-              >
-                Daten importieren
-              </button>
-            )}
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={isMatDomain ? handleMatExport : handleExport}
-              disabled={isMatDomain ? matExporting : exporting}
-            >
-              {(isMatDomain ? matExporting : exporting) ? 'Exportiere...' : 'CSV Export'}
-            </button>
-            <button className="btn btn-outline" onClick={logout}>Logout</button>
+            <div className="mode-tabs" style={{ background: 'rgba(255,255,255,0.06)' }}>
+              {!isMatDomain ? (
+                <>
+                  <button className={`mode-tab ${mode === 'exact' ? 'active' : ''}`} onClick={() => setMode('exact')}>Exakt</button>
+                  <button className={`mode-tab ${mode === 'fuzzy' ? 'active' : ''}`} onClick={() => setMode('fuzzy')}>Ähnlich</button>
+                  <button className={`mode-tab ${mode === 'search' ? 'active' : ''}`} onClick={() => setMode('search')}>Suche</button>
+                  <button className={`mode-tab ${mode === 'regeln' ? 'active' : ''}`} onClick={() => setMode('regeln')}>Regeln</button>
+                </>
+              ) : (
+                <>
+                  <button className={`mode-tab ${matMode === 'exact' ? 'active' : ''}`} onClick={() => setMatMode('exact')}>Exakt</button>
+                  <button className="mode-tab" disabled title="Ähnlichkeitssuche derzeit nicht verfügbar">Ähnlich</button>
+                  <button className={`mode-tab ${matMode === 'search' ? 'active' : ''}`} onClick={() => setMatMode('search')}>Suche</button>
+                  <button className={`mode-tab ${matMode === 'regeln' ? 'active' : ''}`} onClick={() => setMatMode('regeln')}>Regeln</button>
+                  <button className={`mode-tab ${matMode === 'bestellhistorie' ? 'active' : ''}`} onClick={() => setMatMode('bestellhistorie')}>Bestellhistorie</button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Zeile 2: Sub-Tabs */}
-        <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.4rem 0' }}>
-          <div className="mode-tabs" style={{ background: 'rgba(255,255,255,0.06)' }}>
-            {!isMatDomain ? (
-              <>
-                <button className={`mode-tab ${mode === 'exact' ? 'active' : ''}`} onClick={() => setMode('exact')}>Exakt</button>
-                <button className={`mode-tab ${mode === 'fuzzy' ? 'active' : ''}`} onClick={() => setMode('fuzzy')}>Ähnlich</button>
-                <button className={`mode-tab ${mode === 'search' ? 'active' : ''}`} onClick={() => setMode('search')}>Suche</button>
-                <button className={`mode-tab ${mode === 'regeln' ? 'active' : ''}`} onClick={() => setMode('regeln')}>Regeln</button>
-              </>
-            ) : (
-              <>
-                <button className={`mode-tab ${matMode === 'exact' ? 'active' : ''}`} onClick={() => setMatMode('exact')}>Exakt</button>
-                <button className="mode-tab" disabled title="Ähnlichkeitssuche derzeit nicht verfügbar">Ähnlich</button>
-                <button className={`mode-tab ${matMode === 'search' ? 'active' : ''}`} onClick={() => setMatMode('search')}>Suche</button>
-                <button className={`mode-tab ${matMode === 'regeln' ? 'active' : ''}`} onClick={() => setMatMode('regeln')}>Regeln</button>
-                <button className={`mode-tab ${matMode === 'bestellhistorie' ? 'active' : ''}`} onClick={() => setMatMode('bestellhistorie')}>Bestellhistorie</button>
-              </>
-            )}
-          </div>
+        {/* Rechts: Benutzerbereich */}
+        <div className="header-user">
+          <span>{user?.username}</span>
+          {user?.is_admin && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => isMatDomain ? setShowMatImport(true) : setShowImport(true)}
+            >
+              Daten importieren
+            </button>
+          )}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={isMatDomain ? handleMatExport : handleExport}
+            disabled={isMatDomain ? matExporting : exporting}
+          >
+            {(isMatDomain ? matExporting : exporting) ? 'Exportiere...' : 'CSV Export'}
+          </button>
+          <button className="btn btn-outline" onClick={logout}>Logout</button>
         </div>
       </header>
 
