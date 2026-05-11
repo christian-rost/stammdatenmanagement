@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import re
+from datetime import date as _date
 from typing import Optional
 
 import anthropic
@@ -1687,6 +1688,227 @@ async def upload_makt_xlsx(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"MAKT-Upload-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/upload-ekpo-xlsx")
+async def upload_ekpo_xlsx(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """EKPO-XLSX (Blatt 2) hochladen und ekpo_bestellungen-Tabelle neu befüllen."""
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Nur Admins")
+    if not SUPABASE_DB_URL:
+        raise HTTPException(status_code=503, detail="SUPABASE_DB_URL nicht konfiguriert")
+
+    try:
+        content = await file.read()
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+
+        # Blatt 2 per Name (flexibel)
+        sheet_name = next(
+            (s for s in wb.sheetnames if "artikelnummer" in s.lower()),
+            wb.sheetnames[-1] if len(wb.sheetnames) > 1 else wb.sheetnames[0],
+        )
+        ws = wb[sheet_name]
+
+        rows_iter = ws.iter_rows(values_only=True)
+        raw_header = next(rows_iter, [])
+        header = [str(h).strip().upper() if h else "" for h in raw_header]
+
+        matnr_idx = next((i for i, h in enumerate(header) if "MATNR" in h), None)
+        aedat_idx = next((i for i, h in enumerate(header) if "AEDAT" in h), None)
+        ematn_idx = next((i for i, h in enumerate(header) if "EMATN" in h), None)
+
+        if matnr_idx is None:
+            raise ValueError(f"MATNR-Spalte nicht gefunden. Gefundene Spalten: {header[:10]}")
+
+        def _norm_matnr(v):
+            if v is None:
+                return None
+            if isinstance(v, (int, float)):
+                return str(int(v)).zfill(18)
+            return str(v).strip().zfill(18)
+
+        records = []
+        for row in rows_iter:
+            matnr = _norm_matnr(row[matnr_idx])
+            if not matnr:
+                continue
+
+            aedat = None
+            if aedat_idx is not None and row[aedat_idx] is not None:
+                v = row[aedat_idx]
+                from datetime import date as _date
+                if isinstance(v, _date):
+                    aedat = v.isoformat()
+                else:
+                    aedat = str(v)[:10]
+
+            ematn = _norm_matnr(row[ematn_idx]) if ematn_idx is not None else None
+
+            records.append((matnr, aedat, ematn))
+
+        wb.close()
+
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("TRUNCATE TABLE ekpo_bestellungen")
+                if records:
+                    psycopg2.extras.execute_values(
+                        cur,
+                        "INSERT INTO ekpo_bestellungen (matnr, letztes_bestelldatum, ematn)"
+                        " VALUES %s",
+                        records,
+                    )
+            conn.commit()
+        finally:
+            conn.close()
+
+        logger.info(f"EKPO-Upload: {len(records)} Datensätze (Blatt '{sheet_name}') von {current_user['username']}")
+        return {"imported": len(records), "sheet": sheet_name}
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"EKPO-Upload-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+_BESTELL_FILTER_SQL = {
+    "alle":            "",
+    "bestellt":        "WHERE e.matnr IS NOT NULL",
+    "nicht_bestellt":  "WHERE e.matnr IS NULL",
+}
+
+_BESTELL_FILENAMES = {
+    "alle":           "alle_materialien.csv",
+    "bestellt":       "bestellt_seit_2020.csv",
+    "nicht_bestellt": "nicht_bestellt_seit_2020.csv",
+}
+
+
+@app.get("/api/materials/bestellhistorie")
+async def get_material_bestellhistorie(
+    filter: str = "nicht_bestellt",
+    current_user: dict = Depends(get_current_user),
+):
+    """Alle MARA-Materialien mit Bestellstatus (LEFT JOIN ekpo_bestellungen)."""
+    if not SUPABASE_DB_URL:
+        raise HTTPException(status_code=503, detail="SUPABASE_DB_URL nicht konfiguriert")
+    if filter not in _BESTELL_FILTER_SQL:
+        raise HTTPException(status_code=400, detail="filter muss 'alle', 'bestellt' oder 'nicht_bestellt' sein")
+
+    where = _BESTELL_FILTER_SQL[filter]
+    data_sql = f"""
+        SELECT
+            m.matnr,
+            m.maktx,
+            m.maktg,
+            m.mtart,
+            m.matkl,
+            e.letztes_bestelldatum,
+            (e.matnr IS NOT NULL) AS bestellt
+        FROM mara m
+        LEFT JOIN ekpo_bestellungen e ON m.matnr = e.matnr
+        {where}
+        ORDER BY m.matnr
+    """
+    stats_sql = """
+        SELECT
+            COUNT(*)                         AS gesamt,
+            COUNT(e.matnr)                   AS bestellt,
+            COUNT(*) - COUNT(e.matnr)        AS nicht_bestellt
+        FROM mara m
+        LEFT JOIN ekpo_bestellungen e ON m.matnr = e.matnr
+    """
+
+    try:
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(stats_sql)
+                stats = dict(cur.fetchone())
+                cur.execute(data_sql)
+                rows = []
+                for r in cur.fetchall():
+                    rec = dict(r)
+                    if rec.get("letztes_bestelldatum"):
+                        rec["letztes_bestelldatum"] = rec["letztes_bestelldatum"].isoformat()
+                    rec["bestellt"] = bool(rec["bestellt"])
+                    rows.append(rec)
+        finally:
+            conn.close()
+
+        return {"stats": stats, "records": rows}
+    except Exception as e:
+        logger.error(f"Bestellhistorie-Fehler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/materials/bestellhistorie/export")
+async def export_material_bestellhistorie(
+    filter: str = "nicht_bestellt",
+    current_user: dict = Depends(get_current_user),
+):
+    """CSV-Export der gefilterten Bestellhistorie."""
+    if not SUPABASE_DB_URL:
+        raise HTTPException(status_code=503, detail="SUPABASE_DB_URL nicht konfiguriert")
+    if filter not in _BESTELL_FILTER_SQL:
+        raise HTTPException(status_code=400, detail="Ungültiger Filter")
+
+    where = _BESTELL_FILTER_SQL[filter]
+    sql = f"""
+        SELECT
+            m.matnr,
+            m.maktx,
+            m.maktg,
+            m.mtart,
+            m.matkl,
+            e.letztes_bestelldatum
+        FROM mara m
+        LEFT JOIN ekpo_bestellungen e ON m.matnr = e.matnr
+        {where}
+        ORDER BY m.matnr
+    """
+
+    try:
+        conn = psycopg2.connect(SUPABASE_DB_URL)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        def generate():
+            buf = io.StringIO()
+            w = csv.writer(buf, delimiter=";")
+            w.writerow(["MATNR", "MAKTX", "MAKTG", "MTART", "MATKL", "LETZTES_BESTELLDATUM"])
+            yield buf.getvalue()
+            for row in rows:
+                buf = io.StringIO()
+                w = csv.writer(buf, delimiter=";")
+                w.writerow([
+                    row[0] or "",
+                    row[1] or "",
+                    row[2] or "",
+                    row[3] or "",
+                    row[4] or "",
+                    row[5].isoformat() if row[5] else "",
+                ])
+                yield buf.getvalue()
+
+        filename = _BESTELL_FILENAMES[filter]
+        return StreamingResponse(
+            generate(),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.error(f"Bestellhistorie-Export-Fehler: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

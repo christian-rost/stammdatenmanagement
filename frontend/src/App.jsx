@@ -15,6 +15,7 @@ import MaterialFuzzyDetail from './components/MaterialFuzzyDetail.jsx'
 import MaterialSearchView from './components/MaterialSearchView.jsx'
 import MaterialImportModal from './components/MaterialImportModal.jsx'
 import MaterialRegelView from './components/MaterialRegelView.jsx'
+import MaterialBestellhistorieView from './components/MaterialBestellhistorieView.jsx'
 
 function App() {
   const { user, loading, logout, fetchWithAuth, isAuthenticated } = useAuth()
@@ -321,6 +322,7 @@ function App() {
                 <button className="mode-tab" disabled title="Ähnlichkeitssuche derzeit nicht verfügbar">Ähnlich</button>
                 <button className={`mode-tab ${matMode === 'search' ? 'active' : ''}`} onClick={() => setMatMode('search')}>Suche</button>
                 <button className={`mode-tab ${matMode === 'regeln' ? 'active' : ''}`} onClick={() => setMatMode('regeln')}>Regeln</button>
+                <button className={`mode-tab ${matMode === 'bestellhistorie' ? 'active' : ''}`} onClick={() => setMatMode('bestellhistorie')}>Bestellhistorie</button>
               </>
             )}
           </div>
@@ -349,12 +351,17 @@ function App() {
 
       <main className="main-content" style={
         (!isMatDomain && (mode === 'search' || mode === 'regeln')) ||
-        (isMatDomain && (matMode === 'search' || matMode === 'regeln'))
+        (isMatDomain && (matMode === 'search' || matMode === 'regeln' || matMode === 'bestellhistorie'))
           ? { padding: 0 }
           : undefined
       }>
         {isMatDomain ? (
-          matMode === 'regeln' ? (
+          matMode === 'bestellhistorie' ? (
+            <MaterialBestellhistorieView
+              fetchWithAuth={fetchWithAuth}
+              isAdmin={user?.is_admin}
+            />
+          ) : matMode === 'regeln' ? (
             <MaterialRegelView
               fetchWithAuth={fetchWithAuth}
               onGoToDuplicate={group => {
